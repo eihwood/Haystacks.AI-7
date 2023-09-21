@@ -3,3 +3,6 @@ node_modules/
 dist/
 *.csv
 *.pkl
+*checkpoint.ipynb
+src/.ipynb_checkpoints/
+*.log
