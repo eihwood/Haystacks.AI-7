@@ -6,3 +6,4 @@ dist/
 *checkpoint.ipynb
 src/.ipynb_checkpoints/
 *.log
+*.html
