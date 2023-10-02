@@ -34,45 +34,7 @@ pd.set_option("display.max_columns", 500)
 # - Aggregate and combine with SFR
 #
 # ### Read in Migration
-
-# #### Read in Meta Data from PropertyFile
-
-# In[2]:
-
-
-meta = pd.read_csv("../data/PropertyFileAugust2023.csv")[
-    [
-        "Market",
-        "Submarket",
-        "PID",
-        "propertyname",
-        "addressall",
-        "city",
-        "state",
-        "zipcode",
-        "Longitude",
-        "Latitude",
-        "nounits",
-        "OccupancyDate",
-        "Occupancy",
-    ]
-]
-
-# Subset on markets of interest
-meta = meta[
-    meta["Market"].isin(["Cleveland - Akron", "Atlanta - Urban", "Atlanta - Suburban"])
-]
-print(meta["Market"].unique())
-
-print("No. unique zip codes in these markets: " + str(meta["zipcode"].nunique()))
-print(meta["zipcode"].dtype)  # int
-# Change to object so we can subset RPI and HPI (zips are objects in those dataframes)
-# meta['zipcode'] = meta['zipcode'].astype('str')
-meta.head()
-
-
-# In[3]:
-
+######################################## LOAD DATA #######################################################
 # Read in SFR
 with open("../data/SFR/rpi_index.pkl", "rb") as f:
     rpi = pickle.load(f)
@@ -89,54 +51,24 @@ mfr_occ["Period"] = pd.to_datetime(mfr_occ["Period"])
 mfr_occ["Occupancy"] = mfr_occ["Occupancy"] / 100
 
 # create lists of Atlanta/Cleveland zip codes
-rpi_atl_zips = (
-    rpi.loc[rpi["census_cbsa_geoid"] == "12060"]["census_zcta5_geoid"].unique().tolist()
-)
-rpi_cle_zips = (
-    rpi.loc[rpi["census_cbsa_geoid"] == "17460"]["census_zcta5_geoid"].unique().tolist()
-)
-
+# define target cbsa for cleveland and atlanta area zipcodes
+target_cbsa = ['12060', '17460']
+rpi_zips = rpi.loc[rpi['census_cbsa_geoid'].isin(target_cbsa)]['census_zcta5_geoid'].unique().tolist()
 
 # create lists of unique PIDs in mfr_prop for ATL/CLE
-mfr_atl_pids = (
-    mfr_prop.loc[mfr_prop.zipcode.isin(rpi_atl_zips)]["PID"].unique().tolist()
-)
-mfr_cle_pids = (
-    mfr_prop.loc[mfr_prop.zipcode.isin(rpi_cle_zips)]["PID"].unique().tolist()
-)
+mfr_pids = (mfr_prop.loc[mfr_prop.zipcode.isin(rpi_zips)]["PID"].unique().tolist())
 
 # subset mfr_occ and mfr_rent by markets
-mfr_occ_atl = mfr_occ.loc[mfr_occ.PID.isin(mfr_atl_pids)]
-mfr_rent_atl = mfr_rent.loc[mfr_rent.PID.isin(mfr_atl_pids)]
-mfr_occ_cle = mfr_occ.loc[mfr_occ.PID.isin(mfr_cle_pids)]
-mfr_rent_cle = mfr_rent.loc[mfr_rent.PID.isin(mfr_cle_pids)]
+mfr_occ_markets = mfr_occ.loc[mfr_occ.PID.isin(mfr_pids)]
+mfr_rent_markets = mfr_rent.loc[mfr_rent.PID.isin(mfr_pids)]
+
 
 # merge each with zip code and get lists of unique zip codes
-mfr_occ_atl_zips = (
-    mfr_occ_atl.merge(mfr_prop[["PID", "zipcode"]], on="PID")["zipcode"]
-    .unique()
-    .tolist()
-)
-mfr_rent_atl_zips = (
-    mfr_rent_atl.merge(mfr_prop[["PID", "zipcode"]], on="PID")["zipcode"]
-    .unique()
-    .tolist()
-)
-mfr_occ_cle_zips = (
-    mfr_occ_cle.merge(mfr_prop[["PID", "zipcode"]], on="PID")["zipcode"]
-    .unique()
-    .tolist()
-)
-mfr_rent_cle_zips = (
-    mfr_rent_cle.merge(mfr_prop[["PID", "zipcode"]], on="PID")["zipcode"]
-    .unique()
-    .tolist()
-)
+mfr_occ_zips = (mfr_occ_markets.merge(mfr_prop[["PID", "zipcode"]], on="PID")["zipcode"].unique().tolist())
+mfr_rent_zips = (mfr_rent_markets.merge(mfr_prop[["PID", "zipcode"]], on="PID")["zipcode"].unique().tolist())
 
-# create sets to find appicable zip codes; creates a list for each market of zip codes where we have ALL data for MFR and SFR
-atl_zips = list(set(mfr_occ_atl_zips) & set(mfr_rent_atl_zips))
-cle_zips = list(set(mfr_occ_cle_zips) & set(mfr_rent_cle_zips))
-all_zips = atl_zips + cle_zips
+# create sets to find applicable zip codes; creates a list for each market of zip codes where we have ALL data for MFR and SFR
+all_zips = list(set(mfr_occ_zips) & set(mfr_rent_zips))
 
 # subset MFR data by applicable zip codes
 mfr_pids = mfr_prop.loc[mfr_prop.zipcode.isin(all_zips)]["PID"].unique().tolist()
@@ -148,9 +80,7 @@ mfr_occ = mfr_occ.merge(mfr_prop[["PID", "zipcode", "nounits"]], on="PID")
 mfr_rent = mfr_rent.merge(mfr_prop[["PID", "zipcode"]], on="PID")
 
 
-# In[4]:
-
-
+######################### CHECK MISSINGNESS #######################
 # Use datetime.to_period() method to extract month and year
 rpi["Month_Year"] = rpi["date"].dt.to_period("M")
 
