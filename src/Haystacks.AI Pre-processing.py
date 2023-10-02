@@ -227,148 +227,67 @@ mfr_zc.reset_index(inplace=True)
 mfr_zc.drop(columns="index", inplace=True)
 
 # Step 1: Group the DataFrame by 'zipcode'
-grouped = mfr.groupby("zipcode")
+grouped = mfr_zc.groupby("zipcode")
 
 # Step 2: Sort by 'Month_Year' within each group
-sorted_df = grouped.apply(lambda group: group.sort_values(by="Month_Year"))
+sorted_df = grouped.apply(lambda group: group.sort_values(by="Period"))
 
 # Step 3: Update the row index 0 of column 'pc_mean_rent' to be 100
-sorted_df.loc[
-    sorted_df.groupby(level="zipcode").head(1).index,
-    ["pc_mean_rent", "pc_med_rent", "pc_mean_occ", "pc_med_occ"],
-] = 100
+sorted_df.loc[sorted_df.groupby(level="zipcode").head(1).index,["pc_mean_rent", "pc_mean_occ"],] = 100
 
 # Step 4: Update any other NaN values to be 0
 sorted_df.fillna(0, inplace=True)
 
-
-# In[33]:
-
-
-sorted_df.head()
-
-
-# In[34]:
-
-
 # Create a new column 'cumulative_sum' that represents the cumulative sum within each group
-sorted_df[
-    [
-        "mfr_mean_rent_index",
-        "mfr_med_rent_index",
-        "mfr_mean_occ_index",
-        "mfr_med_occ_index",
-    ]
-] = (
-    sorted_df[["pc_mean_rent", "pc_med_rent", "pc_mean_occ", "pc_med_occ"]]
+sorted_df[["mfr_mean_rent_index","mfr_mean_occ_index"]] = (
+    sorted_df[["pc_mean_rent", "pc_mean_occ"]]
     .groupby(level="zipcode")
-    .cumsum()
-)
+    .cumsum())
 
 # Step 3: Update the row index 0 of column 'pc_mean_rent' to be 100
-sorted_df.loc[
-    sorted_df.groupby(level="zipcode").head(1).index,
-    [
-        "mfr_mean_rent_index",
-        "mfr_med_rent_index",
-        "mfr_mean_occ_index",
-        "mfr_med_occ_index",
-    ],
-] = 100
-
-
-# In[35]:
-
+sorted_df.loc[sorted_df.groupby(level="zipcode").head(1).index,
+    ["mfr_mean_rent_index","mfr_mean_occ_index"]] = 100
 
 sorted_df.head(200)
 
-
-# In[36]:
-
-
-# Reset 'zipcode' as a regular column
+# Reset 'zipcode' as a regular column and drop some intermediate columns
 sorted_df = sorted_df.droplevel("zipcode")
+sorted_df.drop(columns = ['pc_mean_rent', 'pc_mean_occ'], inplace=True)
 
-
-# In[37]:
-
-
-sorted_df.head()
-
-
-# In[38]:
-
-
-final = pd.merge(
+data = pd.merge(
     sfr,
     sorted_df,
     how="left",
-    left_on=["Month_Year", "census_zcta5_geoid"],
-    right_on=["Month_Year", "zipcode"],
-)
+    left_on=["date", "census_zcta5_geoid"],
+    right_on=["Period", "zipcode"]).drop(columns = ['Month_Year', 'Period'])
 
 
-# In[39]:
+data.head(100)
 
 
-final.head(100)
 
-
-# In[40]:
-
-
-final.rename(
+data.rename(
     columns={
         "rental_index": "sfr_rental_index",
         "price_index": "sfr_price_index",
-        "median_rent": "mfr_med_rent",
-        "mean_rent": "mfr_mean_rent",
-        "std_rent": "mfr_std_rent",
-        "median_occ": "mfr_med_occ",
-        "mean_occ": "mfr_mean_occ",
-        "std_occ": "mfr_std_occ",
-        "mean_rent_index": "mfr_mean_rent_index",
-        "med_rent_index": "mfr_med_rent_index",
-        "mean_occ_index": "mfr_mean_occ_index",
-        "med_occ_index": "mfr_med_occ_index",
-    },
-    inplace=True,
+        #"median_rent": "mfr_med_rent",
+        "mean_rent_zc": "mfr_mean_rent",
+        #"std_rent": "mfr_std_rent",
+        #"median_occ": "mfr_med_occ",
+        "occupancy": "mfr_occ",
+        #"std_occ": "mfr_std_occ"
+    }, inplace=True)
+
+data.drop(
+    columns="zipcode",
+    inplace=True
 )
+data.head(200)
 
 
-# In[41]:
 
 
-final.drop(
-    columns=[
-        "Period",
-        "date",
-        "zipcode",
-        "pc_mean_rent",
-        "pc_med_rent",
-        "pc_mean_occ",
-        "pc_med_occ",
-    ],
-    inplace=True,
-)
-
-
-# In[42]:
-
-
-final.head(200)
-
-
-# In[44]:
-
-
-final.to_csv("../data/SFRMFR_combined.csv")
-
-
-# # Read in Migration Data
-
-# In[59]:
-
+##################### MIGRATION DATA ##########################################
 
 mig_ata = pd.read_csv("../data/Migration/area_migration_ga_zip.csv")
 mig_clv = pd.read_csv(
