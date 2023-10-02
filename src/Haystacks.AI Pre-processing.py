@@ -151,7 +151,7 @@ sfr.head(200)
 df = sfr.groupby(["census_zcta5_geoid"]).count()
 print("N unique zipcodes = " + str(len(df)))
 # Test whether the values in rental index always equal date
-result = (df["period_start"] == df["rental_index"]).all()
+result = (df["date"] == df["rental_index"]).all()
 
 if result:
     print(
@@ -162,7 +162,7 @@ else:
         "Not all counts in date equal the counts in Rental Price Index indicating missing values."
     )
 
-result = (df["period_start"] == df["price_index"]).all()
+result = (df["date"] == df["price_index"]).all()
 
 if result:
     print(
@@ -173,7 +173,7 @@ else:
         "Not all counts in date equal the counts in House Price Index indicating missing values."
     )
 
-sfr.groupby(["period_start"]).count()  # 220 zip codes with rental indices
+sfr.groupby(["date"]).count()  # 220 zip codes with rental indices
 
 print("rental price index starts in 2010 while housing price index starts in 2007, \
 eliminate dates where there is no RPI as this is our target variable")
@@ -190,75 +190,41 @@ cols = [
 ]
 sfr = sfr[cols]
 
+
 ############################# Aggregate MFR by Month-Year and Zipcode #############################
-# - calculate median and mean standard deviation for rent price and occupancy
-# - then calculate percentage change for median and mean
+# - calculate aggregate rent and occupancy by zipcode
+# - then calculate percentage change as an index similar to RPI and HPI
 
-mfr["median_rent"] = mfr.groupby(["zipcode", "Month_Year"])["Rent"].transform("median")
-mfr["mean_rent"] = mfr.groupby(["zipcode", "Month_Year"])["Rent"].transform("mean")
-mfr["std_rent"] = mfr.groupby(["zipcode", "Month_Year"])["Rent"].transform("std")
+# add column for occupied units (occupancy and nounits are both on the PID level, so we'll reduce the mfr dataframe
+mfr_sub = mfr.drop(columns='UnitType').drop_duplicates(subset=['PID', 'Period'])
 
-mfr["median_occ"] = mfr.groupby(["zipcode", "Month_Year"])["Occupancy"].transform(
-    "median"
-)
-mfr["mean_occ"] = mfr.groupby(["zipcode", "Month_Year"])["Occupancy"].transform("mean")
-mfr["std_occ"] = mfr.groupby(["zipcode", "Month_Year"])["Occupancy"].transform("std")
+mfr_sub['occupied_units'] = mfr_sub['Occupancy'] * mfr_sub['nounits']
 
+# group and aggregate
+mfr_oi = mfr_sub.groupby(['zipcode', 'Period'], as_index=False)[['nounits','occupied_units']].sum()
 
-# In[28]:
+# add column for occupancy by zip code
+mfr_oi['occupancy'] = mfr_oi['occupied_units'] / mfr_oi['nounits']
 
+# Calculate the mean rent for each building, regardless of unit BR#, then take the mean of all buildings in a given zipcode
+# group and aggregate
 
-# drop duplicates and just get the aggregated data
-mfr.drop(
-    columns=[
-        "propertyname",
-        "addressall",
-        "state",
-        "Longitude",
-        "Latitude",
-        "nounits",
-        "Rent",
-        "Occupancy",
-        "UnitType",
-        "PID",
-        "Submarket",
-    ],
-    inplace=True,
-)
-mfr.drop_duplicates(subset=["Month_Year", "zipcode"], inplace=True)
+mfr['mean_rent_PID'] = mfr.groupby(['PID', 'Period'])[['Rent']].transform('mean')
+mfr_ri = mfr.drop(columns = ['UnitType', 'Rent']).drop_duplicates()
 
+mfr_ri = mfr_ri.groupby(['zipcode', 'Period'], as_index=False)[['mean_rent_PID']].mean()
+mfr_ri.rename(columns = {'mean_rent_PID': 'mean_rent_zc'}, inplace=True)
+# merge
+mfr_zc = pd.merge(mfr_oi, mfr_ri, on = ['Period', 'zipcode'])
 
-# In[29]:
-
-
-mfr.head()
-
-
-# In[30]:
-
-
-# Calculate percent change
+# Calculate occ and rent indices as percent change
 
 # Make sure dataframe is in order
-mfr.sort_values(["zipcode", "Month_Year"], inplace=True)
-
-mfr["pc_mean_rent"] = mfr.groupby("zipcode")["mean_rent"].pct_change() * 100
-mfr["pc_med_rent"] = mfr.groupby("zipcode")["median_rent"].pct_change() * 100
-mfr["pc_mean_occ"] = mfr.groupby("zipcode")["mean_occ"].pct_change() * 100
-mfr["pc_med_occ"] = mfr.groupby("zipcode")["median_occ"].pct_change() * 100
-
-mfr.reset_index(inplace=True)
-
-
-# In[31]:
-
-
-mfr.drop(columns="index", inplace=True)
-mfr.head()
-
-
-# In[32]:
-
+mfr_zc.sort_values(["zipcode", "Period"], inplace=True)
+mfr_zc["pc_mean_rent"] = mfr_zc.groupby("zipcode")["mean_rent_zc"].pct_change() * 100
+mfr_zc["pc_mean_occ"] = mfr_zc.groupby("zipcode")["occupancy"].pct_change() * 100
+mfr_zc.reset_index(inplace=True)
+mfr_zc.drop(columns="index", inplace=True)
 
 # Step 1: Group the DataFrame by 'zipcode'
 grouped = mfr.groupby("zipcode")
