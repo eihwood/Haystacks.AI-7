@@ -36,8 +36,14 @@ pd.set_option("display.max_columns", 500)
 # ### Read in Migration
 ######################################## LOAD DATA #######################################################
 # Read in SFR
+## RPI
 with open("../data/SFR/rpi_index.pkl", "rb") as f:
     rpi = pickle.load(f)
+
+## HPI
+hpi_base = open("../data/SFR/hpi_base.pkl", "rb")
+hpi = pd.read_pickle(hpi_base)
+hpi = pd.DataFrame(hpi)
 
 # read in MFR data
 mfr_occ = pd.read_csv("../data/MFR/haystacks_occfile_7-26-2023.csv")
@@ -54,6 +60,9 @@ mfr_occ["Occupancy"] = mfr_occ["Occupancy"] / 100
 # define target cbsa for cleveland and atlanta area zipcodes
 target_cbsa = ['12060', '17460']
 rpi_zips = rpi.loc[rpi['census_cbsa_geoid'].isin(target_cbsa)]['census_zcta5_geoid'].unique().tolist()
+hpi_zips = hpi.loc[hpi['census_cbsa_geoid'].isin(target_cbsa)]['census_zcta5_geoid'].unique().tolist()
+
+hpi_zips == rpi_zips # TRUE so every zip in RPI is in HPI
 
 # create lists of unique PIDs in mfr_prop for ATL/CLE
 mfr_pids = (mfr_prop.loc[mfr_prop.zipcode.isin(rpi_zips)]["PID"].unique().tolist())
@@ -61,7 +70,6 @@ mfr_pids = (mfr_prop.loc[mfr_prop.zipcode.isin(rpi_zips)]["PID"].unique().tolist
 # subset mfr_occ and mfr_rent by markets
 mfr_occ_markets = mfr_occ.loc[mfr_occ.PID.isin(mfr_pids)]
 mfr_rent_markets = mfr_rent.loc[mfr_rent.PID.isin(mfr_pids)]
-
 
 # merge each with zip code and get lists of unique zip codes
 mfr_occ_zips = (mfr_occ_markets.merge(mfr_prop[["PID", "zipcode"]], on="PID")["zipcode"].unique().tolist())
@@ -75,209 +83,69 @@ mfr_pids = mfr_prop.loc[mfr_prop.zipcode.isin(all_zips)]["PID"].unique().tolist(
 mfr_occ = mfr_occ.loc[mfr_occ.PID.isin(mfr_pids)]
 mfr_rent = mfr_rent.loc[mfr_rent.PID.isin(mfr_pids)]
 
+# subset SFR RPI and HPI data by applicable zip codes
+rpi = rpi[rpi['census_zcta5_geoid'].isin(all_zips)]
+hpi = hpi[hpi['census_zcta5_geoid'].isin(all_zips)]
+
 # merge zipcode into mfr_rent and mfr_occ
 mfr_occ = mfr_occ.merge(mfr_prop[["PID", "zipcode", "nounits"]], on="PID")
 mfr_rent = mfr_rent.merge(mfr_prop[["PID", "zipcode"]], on="PID")
 
+# merge mfr occupancy and mfr rent
+set(mfr_rent['zipcode']) == set(mfr_occ['zipcode']) # TRUE
+# NOTE FROM EIH - IF WE ONLY WANT PIDS WHERE WE HAVE BOTH OCCUPANCY AND RENT REMOVE THE 'how = 'left'' 
+mfr = mfr_rent.merge(mfr_occ[['PID','Period','Occupancy', 'nounits']], on = ['PID','Period'], how = 'left')
+len(mfr) == len(mfr_rent)
+mfr.sort_values(['Period', 'PID'], inplace=True)
+
+# Check
+print(rpi["census_zcta5_geoid"].nunique() == mfr["zipcode"].nunique()) # TRUE!
+print("Number of Unique Zipcodes in RPI for Atlanta and Cleveland Markets = ", str(rpi["census_zcta5_geoid"].nunique())) # 200
+set(rpi['census_zcta5_geoid']) == set(hpi['census_zcta5_geoid']) == set(mfr['zipcode']) # TRUE!
+
+rpi.groupby(["date", 'census_cbsa_geoid']).count()  # 220 zip codes with rental indices, 144 in Atlanta, 76 in Cleveland
 
 ######################### CHECK MISSINGNESS #######################
 # Use datetime.to_period() method to extract month and year
 rpi["Month_Year"] = rpi["date"].dt.to_period("M")
-
-print(
-    str(rpi["Month_Year"].nunique()) + " Monthly Periods 2010-Present"
-)  # 164 periods, monthly from 2010 to present
-
-print(
-    "Dates from: " + str(min(rpi["Month_Year"])) + " to " + str(max(rpi["Month_Year"]))
-)
-
+print(str(rpi["Month_Year"].nunique()) + " Monthly Periods 2010-Present for SFR RPI")  # 164 periods, monthly from 2010 to present
+print("Dates from: " + str(min(rpi["Month_Year"])) + " to " + str(max(rpi["Month_Year"])) + "for SFR RPI")
 print(rpi["rental_index"].describe())
 
-print(rpi["census_zcta5_geoid"].dtype)
-rpi["census_zcta5_geoid"] = rpi["census_zcta5_geoid"].astype("int64")
-# rpi.head()
-# Subset on desired market zip codes using all of the zip codes in meta for desired markets
-rpi = rpi[rpi["census_zcta5_geoid"].isin(meta["zipcode"].unique())]
+hpi["Month_Year"] = hpi['period_start'].dt.to_period("M")
+print(str(hpi["Month_Year"].nunique()) + " Monthly Periods 2007-Present for SFR HPI")  # 200 periods, monthly from 2010 to present
+print("Dates from: " + str(min(hpi["Month_Year"])) + " to " + str(max(hpi["Month_Year"])) + "for SFR HPI")
 
+mfr["Month_Year"] = mfr['Period'].dt.to_period("M")
+print(str(mfr["Month_Year"].nunique()) + " Monthly Periods 2015-06/2023 for MFR Rent and Occupancy")  # 200 periods, monthly from 2010 to present
+print("Dates from: " + str(min(mfr["Month_Year"])) + " to " + str(max(mfr["Month_Year"])) + "MFR Rent and Occupancy")
+print(mfr["Occupancy"].describe())
+print(mfr["Rent"].describe())
 
-# In[5]:
-
-
-print(rpi["census_zcta5_geoid"].nunique())
-print(meta["zipcode"].nunique())
-
-
-# In[6]:
-
-
-print(rpi["census_zcta5_geoid"].nunique() == meta["zipcode"].nunique())
-
-
-# Extract unique zc from rpi
-unique_zipcodes_rpi = set(rpi["census_zcta5_geoid"].unique())
-
-# Extract unique zc from meta data
-unique_zipcodes_meta = set(meta["zipcode"].unique())
-
-# Check if unique values in df1 are in df2
-if unique_zipcodes_meta.issubset(unique_zipcodes_rpi):
-    print(
-        "All zipcode values in the metadata markets for Atlanta and Cleveland are in RPI."
-    )
-else:
-    print("Not all zipcode values in metadata are in RPI.")
-
-res = list(set(meta["zipcode"]).difference(rpi["census_zcta5_geoid"]))
-print(res)
-
-missing_areas = meta[meta["zipcode"].isin(res)]
-missing_areas = missing_areas[["Market", "Submarket", "zipcode"]].drop_duplicates(
-    subset=["zipcode"]
-)
-missing_areas.to_csv("../data/SFR/SFR_RPI_missing_market_zipcodes.csv")
-rpi.to_csv("../data/SFR/SFR_RPI_targetmarket_subset.csv")
-
-
-# ### CHECK FOR DATA MISSINGNESS
-
-# In[7]:
-
-
-# Check for months missingness
-
+rpi.groupby(["date", 'census_cbsa_geoid']).count()  # 220 zip codes with rental indices, 144 in Atlanta, 76 in Cleveland
+hpi.groupby(["period_start", 'census_cbsa_geoid']).count()  # 220 zip codes with rental indices, 144 in Atlanta, 76 in Cleveland
+mfr.groupby(['Period', ])
+## Check for months missingness
 # Set index to date, then resample by months and compute size of each group
 s = rpi.set_index("date").resample("MS").size()
 print(s[s == 0].index.tolist())  # no missing month-years
 
-# The size of each date's' corresponds to the number of zipcodes for which there are rent index data in that year-month
-s
+s = hpi.set_index("period_start").resample("MS").size()
+print(s[s == 0].index.tolist())  # no missing month-years
 
 
-# In[8]:
+s = mfr.set_index("Period").resample("MS").size()
+print(s[s == 0].index.tolist())  # no missing month-years in MFR
 
+# NO MISSING MONTH PERIODS
 
-# Look for missingness
-df = rpi.groupby(["census_zcta5_geoid"]).count()
-print("N unique census_cbsa = " + str(len(df)))
-# Test whether the values in rental index always equal date
-result = (df["date"] == df["rental_index"]).all()
+######################## Merge HPI and RPI #########################
 
-if result:
-    print(
-        "All counts (non NaN values) in date equal the counts in rental_index. No missing values"
-    )
-else:
-    print(
-        "Not all counts in date equal the counts in Rental Price Index indicating missing values."
-    )
+sfr = pd.merge(rpi, hpi[['price_index','Month_Year', 'census_zcta5_geoid', 'coef']], how="left", on=["census_zcta5_geoid", "Month_Year"])
 
-rpi.groupby(["date"]).count()  # 11241 zip codes with rental indices
+len(sfr) == len(rpi) # TRUE, merged as expected
 
-
-# ### Read in Haystacks.AI Housing Price Index
-#
-
-# In[9]:
-
-
-hpi_base = open("../data/SFR/hpi_base.pkl", "rb")
-hpi = pd.read_pickle(hpi_base)
-hpi = pd.DataFrame(hpi)
-
-hpi.head(200)
-# Use datetime.to_period() method to extract month and year
-hpi["Month_Year"] = hpi["period_start"].dt.to_period("M")
-
-print(
-    str(hpi["Month_Year"].nunique()) + " Monthly Periods 2007-Present"
-)  # 164 periods, monthly from 2010 to present
-
-print(
-    "Dates from: " + str(min(hpi["Month_Year"])) + " to " + str(max(hpi["Month_Year"]))
-)
-
-print(hpi["price_index"].describe())
-
-
-# In[10]:
-
-
-print(hpi["census_zcta5_geoid"].dtype)
-hpi["census_zcta5_geoid"] = hpi["census_zcta5_geoid"].astype("int64")
-
-# Subset on desired market zip codes using all of the zip codes in meta for desired markets
-hpi = hpi[hpi["census_zcta5_geoid"].isin(meta["zipcode"].unique())]
-
-hpi.head()
-
-
-# In[11]:
-
-
-print(hpi["census_zcta5_geoid"].nunique() == meta["zipcode"].nunique())
-
-print(hpi["census_zcta5_geoid"].nunique())
-print(meta["zipcode"].nunique())
-# Extract unique zc from rpi
-unique_zipcodes_hpi = set(hpi["census_zcta5_geoid"].unique())
-
-# Check if unique values in df1 are in df2
-if unique_zipcodes_meta.issubset(unique_zipcodes_hpi):
-    print(
-        "All zipcode values in the metadata markets for Atlanta and Cleveland are in HPI."
-    )
-else:
-    print("Not all zipcode values in metadata are in HPI.")
-
-res = list(set(meta["zipcode"]).difference(hpi["census_zcta5_geoid"]))
-print(res)
-
-missing_areas = meta[meta["zipcode"].isin(res)]
-missing_areas = missing_areas[["Market", "Submarket", "zipcode"]].drop_duplicates(
-    subset=["zipcode"]
-)
-missing_areas.to_csv("../data/SFR/SFR_HPI_missing_market_zipcodes.csv")
-hpi.to_csv("../data/SFR/SFR_HPI_targetmarket_subset.csv")
-
-
-# In[12]:
-
-
-# # Check if HPI and RPI have same subset of zipcodes
-if unique_zipcodes_rpi.issubset(unique_zipcodes_hpi):
-    print("All zipcode values in the RPI markets for Atlanta and Cleveland are in HPI.")
-else:
-    print("Not all zipcode values in RPI are in HPI.")
-
-res = list(set(rpi["census_zcta5_geoid"]).difference(hpi["census_zcta5_geoid"]))
-print(res)
-
-
-# In[13]:
-
-
-hpi.head()
-
-
-# In[14]:
-
-
-# Merge HPI and RPI
-
-sfr = pd.merge(hpi, rpi, how="left", on=["census_zcta5_geoid", "Month_Year"])
-
-
-# In[15]:
-
-
-print(len(hpi))
-print(len(rpi))
-len(sfr) == len(hpi)
-
-
-# In[16]:
-
+sfr.head(200)
 
 # Look for missingness
 df = sfr.groupby(["census_zcta5_geoid"]).count()
@@ -305,22 +173,10 @@ else:
         "Not all counts in date equal the counts in House Price Index indicating missing values."
     )
 
-sfr.groupby(["period_start"]).count()  # 11241 zip codes with rental indices
+sfr.groupby(["period_start"]).count()  # 220 zip codes with rental indices
 
-print(
-    "rental price index starts in 2010 while housing price index starts in 2007, \
-eliminate dates where there is no RPI as this is our target variable"
-)
-
-sfr.rename(columns={"census_cbsa_geoid_x": "census_cbsa_geoid"}, inplace=True)
-
-sfr = sfr.dropna(subset=["rental_index"]).drop(
-    columns=["census_cbsa_geoid_y", "period_start", "period_end", "trans_period"]
-)
-
-
-# In[17]:
-
+print("rental price index starts in 2010 while housing price index starts in 2007, \
+eliminate dates where there is no RPI as this is our target variable")
 
 # Rearrange the dataframe columns
 cols = [
@@ -334,130 +190,9 @@ cols = [
 ]
 sfr = sfr[cols]
 
-
-# In[18]:
-
-
-sfr.head()
-
-
-# # Read in Multi-Family Data
-
-# In[19]:
-
-
-# Read in data
-mfr_occ = pd.read_csv("../data/MFR/haystacks_occfile_7-26-2023.csv")
-mfr_rent = pd.read_csv("../data/MFR/haystacks_rent_7-17-2023.csv")
-
-
-# In[20]:
-
-
-# Convert dates to datetime objects
-mfr_rent["Period"] = pd.to_datetime(mfr_rent["Period"], format="%Y-%m-%d")
-mfr_occ["Period"] = pd.to_datetime(mfr_occ["Period"], format="%m/%d/%Y")
-
-
-# In[21]:
-
-
-print(mfr_occ.head())
-print(mfr_rent.head())
-
-
-# In[22]:
-
-
-print(len(mfr_occ) == len(mfr_rent))
-print(len(mfr_occ))
-print(len(mfr_rent))
-
-mfr = pd.merge(
-    mfr_rent, mfr_occ, how="left", left_on=["PID", "Period"], right_on=["PID", "Period"]
-)
-
-
-# In[23]:
-
-
-# Subset for relevant PID for Atlanta and Cleveland Markets
-pid_set = set(meta["PID"].unique())
-
-mfr = mfr[mfr["PID"].isin(pid_set)]
-
-
-# In[24]:
-
-
-# Merge with meta data to get the zipcodes / market info
-
-mfr = pd.merge(
-    mfr,
-    meta.drop(columns=["Occupancy", "OccupancyDate"]),
-    left_on="PID",
-    right_on="PID",
-    how="left",
-)
-
-mfr.head()
-
-
-# In[25]:
-
-
-# Use datetime.to_period() method to extract month and year
-mfr["Month_Year"] = mfr["Period"].dt.to_period("M")
-
-print(
-    str(mfr["Month_Year"].nunique()) + " Monthly Periods 2015-Present"
-)  # 164 periods, monthly from 2010 to present
-
-print(
-    "Dates from: " + str(min(mfr["Month_Year"])) + " to " + str(max(mfr["Month_Year"]))
-)
-
-rent_desc_stats = mfr.groupby(["Market", "Submarket", "zipcode"])["Rent"].describe()
-
-# print(mfr_rent_merge.groupby(['Market','Submarket'])['Occupancy'].describe().loc[['mean', 'std']])
-rent_desc_stats.head()
-
-
-# In[26]:
-
-
-print(mfr["zipcode"].nunique() == meta["zipcode"].nunique())
-
-print(mfr["zipcode"].nunique())
-print(meta["zipcode"].nunique())
-# Extract unique zc from rpi
-unique_zipcodes_mfr = set(mfr["zipcode"].unique())
-
-# Check if unique values in df1 are in df2
-if unique_zipcodes_meta.issubset(unique_zipcodes_mfr):
-    print(
-        "All zipcode values in the metadata markets for Atlanta and Cleveland are in MFR."
-    )
-else:
-    print("Not all zipcode values in metadata are in MFR.")
-
-res = list(set(meta["zipcode"]).difference(mfr["zipcode"]))
-print(res)
-
-missing_areas = meta[meta["zipcode"].isin(res)]
-missing_areas = missing_areas[["Market", "Submarket", "zipcode"]].drop_duplicates(
-    subset=["zipcode"]
-)
-missing_areas.to_csv("../data/MFR/MFR_RentOcc_missing_market_zipcodes.csv")
-mfr.to_csv("../data/MFR/MFR_RentOcc_targetmarket_subset.csv")
-
-
-# ## Aggregate MFR by Month-Year and Zipcode
+############################# Aggregate MFR by Month-Year and Zipcode #############################
 # - calculate median and mean standard deviation for rent price and occupancy
 # - then calculate percentage change for median and mean
-
-# In[27]:
-
 
 mfr["median_rent"] = mfr.groupby(["zipcode", "Month_Year"])["Rent"].transform("median")
 mfr["mean_rent"] = mfr.groupby(["zipcode", "Month_Year"])["Rent"].transform("mean")
