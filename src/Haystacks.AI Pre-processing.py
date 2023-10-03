@@ -289,41 +289,80 @@ data.head(200)
 
 ##################### MIGRATION DATA ##########################################
 
-mig_ata = pd.read_csv("../data/Migration/area_migration_ga_zip.csv")
-mig_clv = pd.read_csv(
-    "../data/Migration/haystacks_cleveland_market_tract_migration.csv"
-)
+mig_ata = pd.read_csv("../data/Migration/area_migration_ga_zip.csv").assign(us_zip=lambda x: x['us_zip'].astype(str))
+mig_clv = pd.read_csv("../data/Migration/haystacks-cleveland-migration-patterns.csv").assign(us_zip=lambda x: x['us_zip'].astype(str))
 
-
-# In[56]:
-
-
-mig_ata = mig_ata[mig_ata["us_zip"].isin(meta["zipcode"])]
-mig_clv = mig_clv[mig_clv["us_county_id"].isin(meta["zipcode"])]
-
-
-# In[57]:
-
-
-if set(meta["zipcode"]).issubset(set(mig_ata["us_zip"])):
-    print("All zipcode values in the migration markets for Atlanta meta.")
+# Bind rows
+if (mig_ata.columns == mig_clv.columns).all():
+    mig = pd.concat([mig_ata, mig_clv], ignore_index=True)
 else:
-    print("Not all zipcode values in META are in HPI.")
+    print('Columns in migration Atlanta and Clevelend dataframes are not the same')
+# Make date columns
+mig['date'] = pd.to_datetime(mig['observation_start_date'])
 
-res = list(set(mig_ata["us_zip"]).difference(meta["zipcode"]))
-print(res)
+# Subset on all_zips
+mig = mig[mig["us_zip"].isin(all_zips)]
+
+# Drop some unnecessary columns 
+mig.drop(columns = ['area', 'location_id', 'us_state_id', 'us_zip_id', 'observation_start_date', 'observation_end_date'], inplace = True)
+
+# Calculate population index (group by zipcode)
+# Define a function to divide each element by the first element within each group
+def divide_by_first_element(group):
+    first_element = group.iloc[0]
+    return group / first_element
+
+# Use groupby and transform to apply the function within each group
+mig.sort_values(['us_zip', 'date'], inplace = True)
+
+# These don't change within a zipcode in our time series, so the indices all evaluate to 1
+#mig['population_index'] = mig.groupby('us_zip')['population'].transform(divide_by_first_element)
+#mig['student_pop_index'] = mig.groupby('us_zip')['student_population_fraction'].transform(divide_by_first_element)
+
+mig['inflow_index'] = mig.groupby('us_zip')['inflow_estimated'].transform(divide_by_first_element)
+mig['outflow_index'] = mig.groupby('us_zip')['outflow_estimated'].transform(divide_by_first_element)
+mig['netflow_index'] = mig.groupby('us_zip')['netflow_estimated'].transform(divide_by_first_element)
+
+mig['income_inflow_index'] = mig.groupby('us_zip')['median_income_inflow'].transform(divide_by_first_element)
+mig['income_diff_index'] = mig.groupby('us_zip')['median_income_difference'].transform(divide_by_first_element)
+mig['age_inflow_index'] = mig.groupby('us_zip')['median_age_inflow'].transform(divide_by_first_element)
+mig['age_inflow_diff_index'] = mig.groupby('us_zip')['median_age_difference'].transform(divide_by_first_element)
+
+# Drop Some Columns - not sure what the 'normalized columns' but I'm dropping them
+mig = mig[['date', 'us_zip', 'population','student_population_fraction', 
+       'netflow_estimated', 'inflow_estimated', 'outflow_estimated', 'cumulative_netflow_estimated',
+       'median_income_inflow', 'median_income', 'median_income_difference',
+       'median_age_inflow', 'median_age', 'median_age_difference',
+       'inflow_index', 'outflow_index','netflow_index',
+        'income_inflow_index', 'income_diff_index', 
+        'age_inflow_index', 'age_inflow_diff_index']]
+ # 'netflow_estimated_normalized', 'inflow_estimated_normalized','outflow_estimated_normalized',  'confidence_score'
+
+# Set index to date, then resample by months and compute size of each group to check for missing monthly periods
+s = mig.set_index("date").resample("MS").size()
+print(s[s == 0].index.tolist())  # no missing month-years
 
 
-# In[60]:
+# Look for data missingness
+df = mig.groupby(["us_zip"]).count()
+print("N unique zipcodes = " + str(len(df))) # 219 (missing one zipcode)
+
+# Test whether the values in mig always equal date
+result = (df["date"] == df["inflow_estimated"]).all()
+
+if result:
+    print(
+        "All counts (non NaN values) in date equal the counts in rental_index. No missing values"
+    )
+else:
+    print(
+        "Not all counts in date equal the counts in Rental Price Index indicating missing values."
+    )
+
+# MERGE WITH MFR AND SFR DATA
+data1 = pd.merge(data, mig, how = 'left', left_on = ['date', 'census_zcta5_geoid'], right_on = ['date', 'us_zip'])
+data1.sort_values(['census_zcta5_geoid', 'date'], inplace=True)
 
 
-mig_clv.head()
-
-
-# In[55]:
-
-
-mig_ata.head()
-
-
-# In[ ]:
+# Write the DataFrame to a pickle file
+data1.to_pickle('../data/sfr_mfr_mig_pre-processed.pkl')
