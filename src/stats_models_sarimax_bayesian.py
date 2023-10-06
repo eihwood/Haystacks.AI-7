@@ -251,6 +251,32 @@ ax.fill_between(ci.index, ci.iloc[:,0], ci.iloc[:,1], color='r', alpha=0.1)
 legend = ax.legend(loc='lower left');
 legend.get_frame().set_facecolor('w')
 
+# In-sample one-step-ahead predictions, and out-of-sample forecasts
+# Now get results for full dataset using estimated parameters (on a subset of the data)
+# Fit the model
+mod = sm.tsa.statespace.SARIMAX(endog.loc[:'2022-06-01'], exog.loc[:'2022-06-01'], order=(ar,1,ma))
+res = mod.fit(disp=False, maxiter = 1000)
+
+# In-sample one-step-ahead predictions, and out-of-sample forecasts
+predict = res.get_prediction(start = '2015-01-01',end='2023-06-01', exog = exog_test)
+idx = np.arange(len(predict.predicted_mean))
+predict_ci = predict.conf_int()
+ci = predict_ci.loc['2015-1-01':'2023-06-01'].copy()
+ci.iloc[:,0] -= endog.loc['2015-1-01':'2023-06-01']
+ci.iloc[:,1] -= endog.loc['2015-1-01':'2023-06-01']
+
+# Graph
+fig, ax = plt.subplots(figsize=(12,6))
+ax.xaxis.grid()
+ax.plot(endog, 'k.')
+ax.ylim(bottom = 100, top = 200)
+# Plot
+ax.plot(predict.predicted_mean.loc['2015-01-01':'2022-06-01'], 'gray')
+ax.plot(predict.predicted_mean.loc['2022-07-01':'2023-06-01'], 'k--', linestyle='--', linewidth=2)
+ax.fill_between(ci.index, ci.iloc[:, 0], ci.iloc[:, 1], alpha=0.15)
 
 
+
+
+#################################### MODEL SELECTION ###########################################
 
