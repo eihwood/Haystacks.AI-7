@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import datetime
 from scipy import stats
+
 # Plotting
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -54,6 +55,7 @@ fig, axes = plt.subplots(1, 2, figsize=(15,4))
 fig = sm.graphics.tsa.plot_acf(data.iloc[1:]['D.ln_rpi'], lags=40, ax=axes[0])
 fig = sm.graphics.tsa.plot_pacf(data.iloc[1:]['D.ln_rpi'], lags=40, ax=axes[1])
 
+
 # From the above, we chose AR parameter 'p' based on significant spikes in the PACF plot, in this case 1
 # From the above, we chose MA parameter 'q' based on sharp cutoffs in the ACF plot at q lags. In this case we can 
 # try q = 1
@@ -90,6 +92,7 @@ mae = mean_absolute_error(data['sfr_rental_index'],predict_mle.predicted_mean)
 print('ARIMAX model Training MSE:{}'.format(mse))
 print('ARIMAX model Training MAE:{}'.format(mae))
 print('ARIMAX model Training RMSE:{}'.format(rmse))
+
 
 #################################### Exogenous variables ####################################
 # variables
@@ -145,6 +148,8 @@ print('ARIMAX model Test MSE:{}'.format(mse))
 print('ARIMAX model Test MAE:{}'.format(mae))
 print('ARIMAX model Test RMSE:{}'.format(rmse))
 
+# BAG TESTING FOR HOLD OUT
+
 # Graph
 fig, ax = plt.subplots(figsize=(9, 4), dpi=300)
 
@@ -157,6 +162,8 @@ ax.fill_between(predict_mle_ci.index, lower, upper, color="r", alpha=0.1)
 ax.legend(loc="lower left")
 #ax.set_ylim(50,190)
 plt.show()
+
+# USE K-schiller as a benchmark - compare to market (zillow index e.g)
 
 
 # ARIMA Postestimation Dynamic Forecasting
@@ -255,6 +262,7 @@ legend.get_frame().set_facecolor('w')
 # Now get results for full dataset using estimated parameters (on a subset of the data)
 # Fit the model
 mod = sm.tsa.statespace.SARIMAX(endog.loc[:'2022-06-01'], exog.loc[:'2022-06-01'], order=(ar,1,ma))
+
 res = mod.fit(disp=False, maxiter = 1000)
 
 # In-sample one-step-ahead predictions, and out-of-sample forecasts
