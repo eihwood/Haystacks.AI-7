@@ -4,40 +4,22 @@ import pandas as pd
 import numpy as np
 import datetime
 from scipy import stats
-import warnings
-warnings.filterwarnings('ignore')
-from pandas.plotting import register_matplotlib_converters
+
 # Plotting
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# SARIMAX and Bayesian Estimation 
-import statsmodels.api as sm #sarimax
-#import pymc3 as pm
-#import theano as th
-#import theano.tensor as tt
-#Model Eval
+# SARIMAX
+import warnings
+warnings.filterwarnings('ignore')
+import statsmodels.api as sm
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import mean_absolute_error
 
-plt.style.use("seaborn")
-register_matplotlib_converters()
 
-
-##########################################################################################################
-
-# Functionalize - reuse and report metric - takes in a model object and spits out 
-# MAE, MAPE, AIC, etc etc
-
-# Write helper function for model evaluation
-
-def model_eval(fitobj):
-    
-
-
-
-
-
+# Set options
+pd.set_option("display.max_rows", 500)
+pd.set_option("display.max_columns", 500)
 
 
 # Load data, sort on zip and date and set index to datetime
@@ -111,7 +93,7 @@ print('ARIMAX model Training MSE:{}'.format(mse))
 print('ARIMAX model Training MAE:{}'.format(mae))
 print('ARIMAX model Training RMSE:{}'.format(rmse))
 
-# GET MEAN ABSOLUTE PERCENT ERROR
+
 #################################### Exogenous variables ####################################
 # variables
 training_sta = '2015-01-01'
@@ -182,6 +164,7 @@ ax.legend(loc="lower left")
 plt.show()
 
 # USE K-schiller as a benchmark - compare to market (zillow index e.g)
+
 
 # ARIMA Postestimation Dynamic Forecasting
 # Variables
