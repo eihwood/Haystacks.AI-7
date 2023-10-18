@@ -176,3 +176,6 @@ for zc in zcs:
 
 # Concatenate results together
 final = pd.concat(df_list)
+
+
+final.to_pickle('../data/sarimax_par_tuning_results.pkl')
