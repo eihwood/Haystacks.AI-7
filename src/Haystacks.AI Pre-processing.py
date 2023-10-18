@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import datetime
+import math
 
 pd.set_option("display.max_rows", 500)
 pd.set_option("display.max_columns", 500)
@@ -93,20 +94,32 @@ mfr_rent = mfr_rent.merge(mfr_prop[["PID", "zipcode"]], on="PID")
 
 # merge mfr occupancy and mfr rent
 set(mfr_rent['zipcode']) == set(mfr_occ['zipcode']) # TRUE
+set(mfr_rent['PID']) == set(mfr_occ['PID']) # FALSE occ and rent do not have the exact same PIDs
+
 # NOTE FROM EIH - IF WE ONLY WANT PIDS WHERE WE HAVE BOTH OCCUPANCY AND RENT REMOVE THE 'how = 'left'' 
-mfr = mfr_rent.merge(mfr_occ[['PID','Period','Occupancy', 'nounits']], on = ['PID','Period'], how = 'left')
-len(mfr) == len(mfr_rent)
-mfr.sort_values(['Period', 'PID'], inplace=True)
+
+# AVM - bc rent and occ have different unique PIDs, merge 'left' results in occ data being dropped
+len(set(mfr_occ['PID']) - set(mfr_rent['PID'])) # 54 properties would be dropped from dataset
+
+# AVM - commenting out the mfr merge, going to summarize mfr_occ and mfr_rent by zip code before merging
+### begin ###
+# mfr = mfr_rent.merge(mfr_occ[['PID','Period','Occupancy', 'nounits']], on = ['PID','Period'], how = 'left')
+# len(mfr) == len(mfr_rent)
+# mfr.sort_values(['Period', 'PID'], inplace=True)
+### end ###
 
 # Check
-print(rpi["census_zcta5_geoid"].nunique() == mfr["zipcode"].nunique()) # TRUE!
+print(rpi["census_zcta5_geoid"].nunique() == mfr_rent["zipcode"].nunique()) # TRUE!
+print(rpi["census_zcta5_geoid"].nunique() == mfr_occ["zipcode"].nunique()) # TRUE!
+
 print("Number of Unique Zipcodes in RPI for Atlanta and Cleveland Markets = ", str(rpi["census_zcta5_geoid"].nunique())) # 200
-set(rpi['census_zcta5_geoid']) == set(hpi['census_zcta5_geoid']) == set(mfr['zipcode']) # TRUE!
+set(rpi['census_zcta5_geoid']) == set(hpi['census_zcta5_geoid']) == set(mfr_occ['zipcode']) == set(mfr_rent['zipcode']) # TRUE!
 
 rpi.groupby(["date", 'census_cbsa_geoid']).count()  # 220 zip codes with rental indices, 144 in Atlanta, 76 in Cleveland
 
 ######################### CHECK MISSINGNESS #######################
 # Use datetime.to_period() method to extract month and year
+
 rpi["Month_Year"] = rpi["date"].dt.to_period("M")
 print(str(rpi["Month_Year"].nunique()) + " Monthly Periods 2010-Present for SFR RPI")  # 164 periods, monthly from 2010 to present
 print("Dates from: " + str(min(rpi["Month_Year"])) + " to " + str(max(rpi["Month_Year"])) + "for SFR RPI")
@@ -116,15 +129,20 @@ hpi["Month_Year"] = hpi['period_start'].dt.to_period("M")
 print(str(hpi["Month_Year"].nunique()) + " Monthly Periods 2007-Present for SFR HPI")  # 200 periods, monthly from 2010 to present
 print("Dates from: " + str(min(hpi["Month_Year"])) + " to " + str(max(hpi["Month_Year"])) + "for SFR HPI")
 
-mfr["Month_Year"] = mfr['Period'].dt.to_period("M")
-print(str(mfr["Month_Year"].nunique()) + " Monthly Periods 2015-06/2023 for MFR Rent and Occupancy")  # 200 periods, monthly from 2010 to present
-print("Dates from: " + str(min(mfr["Month_Year"])) + " to " + str(max(mfr["Month_Year"])) + "MFR Rent and Occupancy")
-print(mfr["Occupancy"].describe())
-print(mfr["Rent"].describe())
+mfr_rent["Month_Year"] = mfr_rent['Period'].dt.to_period("M")
+print(str(mfr_rent["Month_Year"].nunique()) + " Monthly Periods 2015-06/2023 for MFR Rent")  # 200 periods, monthly from 2010 to present
+print("Dates from: " + str(min(mfr_rent["Month_Year"])) + " to " + str(max(mfr_rent["Month_Year"])) + " MFR Rent")
+print(mfr_rent["Rent"].describe())
+
+mfr_occ["Month_Year"] = mfr_occ['Period'].dt.to_period("M")
+print(str(mfr_occ["Month_Year"].nunique()) + " Monthly Periods 2015-06/2023 for MFR Occ")  # 200 periods, monthly from 2010 to present
+print("Dates from: " + str(min(mfr_occ["Month_Year"])) + " to " + str(max(mfr_occ["Month_Year"])) + " MFR Occ")
+print(mfr_occ["Occupancy"].describe())
+
 
 rpi.groupby(["date", 'census_cbsa_geoid']).count()  # 220 zip codes with rental indices, 144 in Atlanta, 76 in Cleveland
 hpi.groupby(["period_start", 'census_cbsa_geoid']).count()  # 220 zip codes with rental indices, 144 in Atlanta, 76 in Cleveland
-mfr.groupby(['Period', ])
+
 ## Check for months missingness
 # Set index to date, then resample by months and compute size of each group
 s = rpi.set_index("date").resample("MS").size()
@@ -134,13 +152,18 @@ s = hpi.set_index("period_start").resample("MS").size()
 print(s[s == 0].index.tolist())  # no missing month-years
 
 
-s = mfr.set_index("Period").resample("MS").size()
-print(s[s == 0].index.tolist())  # no missing month-years in MFR
+s = mfr_rent.set_index("Period").resample("MS").size()
+print(s[s == 0].index.tolist())  # no missing month-years in MFR Rent
+
+s = mfr_occ.set_index("Period").resample("MS").size()
+print(s[s == 0].index.tolist())  # no missing month-years in MFR Occ
 
 # NO MISSING MONTH PERIODS
 
 ######################## Merge HPI and RPI #########################
 
+# rental price index starts in 2010 while housing price index starts in 2007
+# merge left eliminates dates where there is no RPI as this is our target variable 
 sfr = pd.merge(rpi, hpi[['price_index','Month_Year', 'census_zcta5_geoid', 'coef']], how="left", on=["census_zcta5_geoid", "Month_Year"])
 
 len(sfr) == len(rpi) # TRUE, merged as expected
@@ -175,9 +198,6 @@ else:
 
 sfr.groupby(["date"]).count()  # 220 zip codes with rental indices
 
-print("rental price index starts in 2010 while housing price index starts in 2007, \
-eliminate dates where there is no RPI as this is our target variable")
-
 # Rearrange the dataframe columns
 cols = [
     "Month_Year",
@@ -195,68 +215,65 @@ sfr = sfr[cols]
 # - calculate aggregate rent and occupancy by zipcode
 # - then calculate percentage change as an index similar to RPI and HPI
 
+### Occupancy ###
 # add column for occupied units (occupancy and nounits are both on the PID level, so we'll reduce the mfr dataframe
-mfr_sub = mfr.drop(columns='UnitType').drop_duplicates(subset=['PID', 'Period'])
-
-mfr_sub['occupied_units'] = mfr_sub['Occupancy'] * mfr_sub['nounits']
+mfr_occ['occupied_units'] = mfr_occ['Occupancy'] * mfr_occ['nounits']
 
 # group and aggregate
-mfr_oi = mfr_sub.groupby(['zipcode', 'Period'], as_index=False)[['nounits','occupied_units']].sum()
+mfr_occ = mfr_occ.groupby(['zipcode', 'Period'], as_index=False)[['nounits','occupied_units']].sum()
 
 # add column for occupancy by zip code
-mfr_oi['occupancy'] = mfr_oi['occupied_units'] / mfr_oi['nounits']
+mfr_occ['occupancy'] = mfr_occ['occupied_units'] / mfr_occ['nounits']
 
+# Calculate mean occ as an index by zip code
+# make sure it's sorted correctly
+mfr_occ.sort_values(["zipcode", "Period"], inplace=True)
+
+# create a column containing the first value for each zip code
+mfr_occ['first_period_value'] = mfr_occ.groupby('zipcode')['occupancy'].transform('first')
+
+# create a column representing the index
+mfr_occ['mfr_mean_occ_index'] = (mfr_occ['occupancy'] / mfr_occ['first_period_value']) * 100
+
+# drop intermediate column
+mfr_occ.drop(columns='first_period_value', inplace=True)
+
+
+### Rent ###
 # Calculate the mean rent for each building, regardless of unit BR#, then take the mean of all buildings in a given zipcode
 # group and aggregate
 
-mfr['mean_rent_PID'] = mfr.groupby(['PID', 'Period'])[['Rent']].transform('mean')
-mfr_ri = mfr.drop(columns = ['UnitType', 'Rent']).drop_duplicates()
+# rent by building
+mfr_rent = mfr_rent.groupby(['zipcode', 'Period', 'PID'], as_index=False)[['Rent']].mean()
 
-mfr_ri = mfr_ri.groupby(['zipcode', 'Period'], as_index=False)[['mean_rent_PID']].mean()
-mfr_ri.rename(columns = {'mean_rent_PID': 'mean_rent_zc'}, inplace=True)
-# merge
-mfr_zc = pd.merge(mfr_oi, mfr_ri, on = ['Period', 'zipcode'])
+# rent by zip
+mfr_rent = mfr_rent.groupby(['zipcode', 'Period'], as_index=False)[['Rent']].mean()
 
-# Calculate occ and rent indices as percent change
+# rename col
+mfr_rent.rename(columns = {'Rent': 'mean_rent_zc'}, inplace=True)
 
-# Make sure dataframe is in order
-mfr_zc.sort_values(["zipcode", "Period"], inplace=True)
-mfr_zc["pc_mean_rent"] = mfr_zc.groupby("zipcode")["mean_rent_zc"].pct_change() * 100
-mfr_zc["pc_mean_occ"] = mfr_zc.groupby("zipcode")["occupancy"].pct_change() * 100
-mfr_zc.reset_index(inplace=True)
-mfr_zc.drop(columns="index", inplace=True)
+# Calculate mean rent as an index by zip code
+# make sure it's sorted correctly
+mfr_rent.sort_values(["zipcode", "Period"], inplace=True)
 
-# Step 1: Group the DataFrame by 'zipcode'
-grouped = mfr_zc.groupby("zipcode")
+# create a column containing the first value for each zip code
+mfr_rent['first_period_value'] = mfr_rent.groupby('zipcode')['mean_rent_zc'].transform('first')
 
-# Step 2: Sort by 'Month_Year' within each group
-sorted_df = grouped.apply(lambda group: group.sort_values(by="Period"))
+# create a column representing the index
+mfr_rent['mfr_mean_rent_index'] = (mfr_rent['mean_rent_zc'] / mfr_rent['first_period_value']) * 100
 
-# Step 3: Update the row index 0 of column 'pc_mean_rent' to be 100
-sorted_df.loc[sorted_df.groupby(level="zipcode").head(1).index,["pc_mean_rent", "pc_mean_occ"],] = 100
+# drop intermediate column
+mfr_rent.drop(columns='first_period_value', inplace=True)
 
-# Step 4: Update any other NaN values to be 0
-sorted_df.fillna(0, inplace=True)
 
-# Create a new column 'cumulative_sum' that represents the cumulative sum within each group
-sorted_df[["mfr_mean_rent_index","mfr_mean_occ_index"]] = (
-    sorted_df[["pc_mean_rent", "pc_mean_occ"]]
-    .groupby(level="zipcode")
-    .cumsum())
+# MERGE MFR RENT & OCC
+mfr_zc = pd.merge(mfr_occ, mfr_rent, on = ['Period', 'zipcode'])
 
-# Step 3: Update the row index 0 of column 'pc_mean_rent' to be 100
-sorted_df.loc[sorted_df.groupby(level="zipcode").head(1).index,
-    ["mfr_mean_rent_index","mfr_mean_occ_index"]] = 100
 
-sorted_df.head(200)
-
-# Reset 'zipcode' as a regular column and drop some intermediate columns
-sorted_df = sorted_df.droplevel("zipcode")
-sorted_df.drop(columns = ['pc_mean_rent', 'pc_mean_occ'], inplace=True)
 
 data = pd.merge(
     sfr,
-    sorted_df,
+    mfr_zc,
     how="left",
     left_on=["date", "census_zcta5_geoid"],
     right_on=["Period", "zipcode"]).drop(columns = ['Month_Year', 'Period'])
@@ -284,6 +301,38 @@ data.drop(
 )
 data.head(200)
 
+data
+
+
+
+########## ADDITIONAL FEATURES: rental delta, cos_month, sin_month ##########
+
+# make sure it's sorted correctly
+data.sort_values(["census_zcta5_geoid", "date"], inplace=True)
+
+
+### month sin & cos ###
+# create column with month integer value
+data['month'] = data['date'].dt.month
+
+# normalize month to a 2*pi scale
+data['month_norm'] = 2 * math.pi * data['month'] / 12
+
+# create columns for sin and cosine
+data['cos_month'] = np.cos(data['month_norm'])
+data['sin_month'] = np.sin(data['month_norm'])
+
+# change month to a string
+data['month'] = data['month'].astype('str')
+
+### rental delta ###
+# create offset column for delta calculation
+data['rpi_offset'] = data.groupby('census_zcta5_geoid')['sfr_rental_index'].shift()
+data['rpi_offset'].fillna(data['sfr_rental_index'], inplace=True)
+data['sfr_rental_delta'] = data['sfr_rental_index'] - data['rpi_offset']
+
+# drop intermediate columns
+data.drop(columns=['month_norm','rpi_offset'], inplace=True)
 
 
 
