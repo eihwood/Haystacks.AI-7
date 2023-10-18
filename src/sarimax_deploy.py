@@ -176,13 +176,6 @@ for zc in zcs:
 
 # Concatenate results together
 final = pd.concat(df_list)
-<<<<<<< HEAD
 
-#final.to_csv('../data/sarimax_par_tuning_results1.csv')
+
 final.to_pickle('../data/sarimax_par_tuning_results.pkl')
-
-
-
-
-=======
->>>>>>> abf7715111350f966ee780b225fea4f324f8985d
