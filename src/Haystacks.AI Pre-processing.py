@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import datetime
+import math
 
 pd.set_option("display.max_rows", 500)
 pd.set_option("display.max_columns", 500)
@@ -224,6 +225,20 @@ mfr_occ = mfr_occ.groupby(['zipcode', 'Period'], as_index=False)[['nounits','occ
 # add column for occupancy by zip code
 mfr_occ['occupancy'] = mfr_occ['occupied_units'] / mfr_occ['nounits']
 
+# Calculate mean occ as an index by zip code
+# make sure it's sorted correctly
+mfr_occ.sort_values(["zipcode", "Period"], inplace=True)
+
+# create a column containing the first value for each zip code
+mfr_occ['first_period_value'] = mfr_occ.groupby('zipcode')['occupancy'].transform('first')
+
+# create a column representing the index
+mfr_occ['mfr_mean_occ_index'] = (mfr_occ['occupancy'] / mfr_occ['first_period_value']) * 100
+
+# drop intermediate column
+mfr_occ.drop(columns='first_period_value', inplace=True)
+
+
 ### Rent ###
 # Calculate the mean rent for each building, regardless of unit BR#, then take the mean of all buildings in a given zipcode
 # group and aggregate
@@ -236,42 +251,29 @@ mfr_rent = mfr_rent.groupby(['zipcode', 'Period'], as_index=False)[['Rent']].mea
 
 # rename col
 mfr_rent.rename(columns = {'Rent': 'mean_rent_zc'}, inplace=True)
-# merge
+
+# Calculate mean rent as an index by zip code
+# make sure it's sorted correctly
+mfr_rent.sort_values(["zipcode", "Period"], inplace=True)
+
+# create a column containing the first value for each zip code
+mfr_rent['first_period_value'] = mfr_rent.groupby('zipcode')['mean_rent_zc'].transform('first')
+
+# create a column representing the index
+mfr_rent['mfr_mean_rent_index'] = (mfr_rent['mean_rent_zc'] / mfr_rent['first_period_value']) * 100
+
+# drop intermediate column
+mfr_rent.drop(columns='first_period_value', inplace=True)
+
+
+# MERGE MFR RENT & OCC
 mfr_zc = pd.merge(mfr_occ, mfr_rent, on = ['Period', 'zipcode'])
 
-# Calculate occ and rent indices as percent change
 
-# Make sure dataframe is in order
-mfr_zc.sort_values(["zipcode", "Period"], inplace=True)
-mfr_zc["pc_mean_rent"] = mfr_zc.groupby("zipcode")["mean_rent_zc"].pct_change() * 100
-mfr_zc["pc_mean_occ"] = mfr_zc.groupby("zipcode")["occupancy"].pct_change() * 100
-mfr_zc.reset_index(inplace=True)
-mfr_zc.drop(columns="index", inplace=True)
-
-# Step 1: Group the DataFrame by 'zipcode'
-grouped = mfr_zc.groupby("zipcode")
-
-# Step 2: Sort by 'Month_Year' within each group
-sorted_df = grouped.apply(lambda group: group.sort_values(by="Period"))
-
-# Step 3: Update the row index 0 of column 'pc_mean_rent' to be 100
-sorted_df.loc[sorted_df.groupby(by="zipcode").head(1).index,["pc_mean_rent", "pc_mean_occ"],] = 100
-
-# Step 4: Update any other NaN values to be 0
-sorted_df.fillna(0, inplace=True)
-
-# Create a new column 'cumulative_sum' that represents the cumulative sum within each group
-sorted_df["mfr_mean_rent_index"] = sorted_df.groupby(by="zipcode")['pc_mean_rent'].cumsum()
-sorted_df["mfr_mean_occ_index"] = sorted_df.groupby(by="zipcode")['pc_mean_occ'].cumsum()
-
-sorted_df.head(200)
-
-# Reset 'zipcode' as a regular column and drop some intermediate columns
-sorted_df.drop(columns = ['pc_mean_rent', 'pc_mean_occ'], inplace=True)
 
 data = pd.merge(
     sfr,
-    sorted_df,
+    mfr_zc,
     how="left",
     left_on=["date", "census_zcta5_geoid"],
     right_on=["Period", "zipcode"]).drop(columns = ['Month_Year', 'Period'])
@@ -299,6 +301,38 @@ data.drop(
 )
 data.head(200)
 
+data
+
+
+
+########## ADDITIONAL FEATURES: rental delta, cos_month, sin_month ##########
+
+# make sure it's sorted correctly
+data.sort_values(["census_zcta5_geoid", "date"], inplace=True)
+
+
+### month sin & cos ###
+# create column with month integer value
+data['month'] = data['date'].dt.month
+
+# normalize month to a 2*pi scale
+data['month_norm'] = 2 * math.pi * data['month'] / 12
+
+# create columns for sin and cosine
+data['cos_month'] = np.cos(data['month_norm'])
+data['sin_month'] = np.sin(data['month_norm'])
+
+# change month to a string
+data['month'] = data['month'].astype('str')
+
+### rental delta ###
+# create offset column for delta calculation
+data['rpi_offset'] = data.groupby('census_zcta5_geoid')['sfr_rental_index'].shift()
+data['rpi_offset'].fillna(data['sfr_rental_index'], inplace=True)
+data['sfr_rental_delta'] = data['sfr_rental_index'] - data['rpi_offset']
+
+# drop intermediate columns
+data.drop(columns=['month_norm','rpi_offset'], inplace=True)
 
 
 
