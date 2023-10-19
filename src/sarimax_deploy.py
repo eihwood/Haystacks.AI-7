@@ -119,7 +119,7 @@ def allzips_cv(zcs, df_trainval, exog_var_names = None):
             res_sari_L.append(res_sari)
         res_cv = pd.concat(res_sari_L)
     df_list.append(res_cv) 
-    return(pd.concat(df_list))
+    return(df_list)
 
 
 # Load data, sort on zip and date and set index to datetime
