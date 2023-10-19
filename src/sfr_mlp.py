@@ -32,28 +32,27 @@ from torch.utils.data import Dataset, DataLoader
 with open("../data/sfr_mfr_mig_pre-processed.pkl", "rb") as f: df = pickle.load(f)
 df.sort_values(['census_cbsa_geoid', 'census_zcta5_geoid', 'date'], inplace = True)
 
-df = df[['date', 'census_zcta5_geoid', 'sfr_rental_index', 'sfr_price_index', 'mfr_mean_rent_index', 'mfr_mean_occ_index']]
-df = df[df['date']>='2014-12-01']
+df = df[['date', 'census_zcta5_geoid', 
+         'sfr_rental_delta', 'sfr_price_delta', 
+         'mfr_rental_delta', 'mfr_occ_delta',
+        'sin_month', 'cos_month']]
+df = df[(df['date']>'2014-12-01')& (df['date'] <= '2023-06-01')]
 
-# Month as input
-df['Month'] = df['date'].dt.month # make this cyclical so 11-12 is same as 12-1 (1-12) sin and cosin of the month 0-2pi
 
-
+# Subset one zipcode
 data = df[df['census_zcta5_geoid'] == '30002']
 
-# Translate all index columns into delta
-data['offset'] = data['sfr_rental_index'].shift(periods = 1)
-data.dropna(inplace=True)
-data['sfr_rental_delta'] = data['sfr_rental_index'] - data['offset'] 
 
 # We want to know min / max values per offset columns (keep track for scaling -1, 1). When you get prediciton, scale it back
 # Do min/max only on training dataset otherwise leaking info. 
 sfr_offset_min = data['sfr_rental_delta'].min() # store as meta data for each indexed column
 sfr_offset_max = data['sfr_rental_delta'].max() # store as meta data for each indexed column
-
-# Define month transform function
-data['sin_month'] = data['Month'].apply(lambda m: math.sin(2 * math.pi * ((m-1) / 11)))
-data['cos_month'] = data['Month'].apply(lambda m: math.cos(2 * math.pi * ((m-1) / 11)))
+sfr_price_offset_min = data['sfr_price_delta'].min() # store as meta data for each indexed column
+sfr_price_offset_max = data['sfr_price_delta'].max() # store as meta data for each indexed column
+mfr_occ_offset_min = data['mfr_occ_delta'].min() # store as meta data for each indexed column
+mfr_occ_offset_max = data['mfr_occ_delta'].max() # store as meta data for each indexed column
+mfr_rent_offset_min = data['mfr_rental_delta'].min() # store as meta data for each indexed column
+mfr_rent_offset_max = data['mfr_rental_delta'].max() # store as meta data for each indexed column
 
 
 

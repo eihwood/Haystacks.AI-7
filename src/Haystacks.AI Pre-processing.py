@@ -299,11 +299,6 @@ data.drop(
     columns="zipcode",
     inplace=True
 )
-data.head(200)
-
-data
-
-
 
 ########## ADDITIONAL FEATURES: rental delta, cos_month, sin_month ##########
 
@@ -331,8 +326,25 @@ data['rpi_offset'] = data.groupby('census_zcta5_geoid')['sfr_rental_index'].shif
 data['rpi_offset'].fillna(data['sfr_rental_index'], inplace=True)
 data['sfr_rental_delta'] = data['sfr_rental_index'] - data['rpi_offset']
 
+# create offset column for delta calculation of all index vars
+data['offset'] = data.groupby('census_zcta5_geoid')['sfr_price_index'].shift()
+data['offset'].fillna(data['sfr_price_index'], inplace=True)
+data['sfr_price_delta'] = data['sfr_price_index'] - data['offset']
+
+# MFR OCC
+data['offset'] = data.groupby('census_zcta5_geoid')['mfr_mean_occ_index'].shift()
+data['offset'].fillna(data['mfr_mean_occ_index'], inplace=True)
+data['mfr_occ_delta'] = data['mfr_mean_occ_index'] - data['offset']
+
+# MFR rental index
+var = 'mfr_mean_rent_index'
+data['offset'] = data.groupby('census_zcta5_geoid')[var].shift()
+data['offset'].fillna(data[var], inplace=True)
+data['mfr_rental_delta'] = data[var] - data['offset']
+
+
 # drop intermediate columns
-data.drop(columns=['month_norm','rpi_offset'], inplace=True)
+data.drop(columns=['month_norm','rpi_offset', 'offset'], inplace=True)
 
 
 
