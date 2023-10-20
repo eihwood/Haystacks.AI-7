@@ -170,9 +170,20 @@ for zc in zcs:
 multi_df = pd.concat(multi_)
 multi_df['mmape'] = multi_df.groupby(['zipcode', 'type'])['MAPE'].transform('mean')
 multi_df.to_pickle('../data/sarimax_multivariate_cv_results.pkl')
+
+# Group and summarise
+final = pd.concat([univar_df, multi_df])
+final[['maic', 'mbic', 'mmape', 'mmae', 'mmse']] = final.groupby(['zipcode', 'type'])[['aic', 'bic', 'MAPE', 'MAE', 'MSE']].transform('mean')
+
+final.drop(columns = ['aic', 'bic', 'MAPE', 'MAE', 'MSE', 'crossfold'], inplace = True)
+final.drop_duplicates(inplace = True)
+final.to_csv('../data/sarimax_3fold_cv_res.csv')
 # PLOT
-plot_df = pd.concat([univar_df, multi_df])[['zipcode', 'type', 'mmape']].drop_duplicates()
 
-sns.displot(plot_df, x="mmape", hue="type", kind="kde")
+# create a seaborn plot
+sns.set(style="darkgrid")
 
+ax = sns.displot(final, x="mmape", hue="type", kind="kde")
+# save the plot as JPG file
+plt.savefig("../sarimax_cv_res.jpg", dpi=300)
 
