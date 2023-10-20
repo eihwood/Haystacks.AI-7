@@ -45,7 +45,7 @@ def mod_eval(sxmodel, endog_test, exog_test = None, n_periods = 6):
     return res
 
 # Define function
-def refit_sarimax(fit, zc, endog_train, endog_test,exog_train = None, exog_test = None):
+def refit_sarimax(zc, endog_train, endog_test,exog_train = None, exog_test = None):
     '''
     Input: 
         fit : a previously fitted auto-arima model with initial starting params
@@ -60,20 +60,24 @@ def refit_sarimax(fit, zc, endog_train, endog_test,exog_train = None, exog_test 
         Best Parameters for SARIMAX Model along with cross validation scores
     '''
     ans = []
-    print(zc)
 
-    
-    # SARIMAX Model Refit
-    newfit = fit.update(y = endog_train, X = exog_train, maxiter = 100)
-    mape, mae, mse = mod_eval(newfit, endog_test, exog_test)
-    comb = newfit.order
-    combs = newfit.seasonal_order
-    ans.append([zc, comb, combs, newfit.aic(), newfit.bic(),mape, mae, mse])
+    # autoarima
+    d = ndiffs(endog_train, alpha = 0.05)
+    D = nsdiffs(endog_train, m = 12)
+    sxmodel = pm.auto_arima(y = endog_train, X = exog_train,
+                            start_p=1, d = d, start_q=1, max_p=3, max_q=3, m=12,
+                            start_P=0, start_Q=0, max_P=2, max_Q=2, D = D,
+                            seasonal=True, trace=True, error_action='ignore',
+                            suppress_warnings=True, stepwise=True, information_criterion='bic')
+    mape, mae, mse = mod_eval(sxmodel, endog_test, exog_test)
+    comb = sxmodel.order
+    combs = sxmodel.seasonal_order
+    ans.append([zc, comb, combs, sxmodel.aic(), sxmodel.bic(),mape, mae, mse])
     
     # Convert into dataframe
     ans_df = pd.DataFrame(ans, columns=['zipcode', 'pdq', 'pdqs', 'aic', 'bic','MAPE', 'MAE', 'MSE'])
     
-    return [ans_df, newfit]
+    return [ans_df, sxmodel]
 
 def arima_findpdqs(y, X=None):
     # Pre-compute d and D
@@ -110,8 +114,8 @@ def autoarima_cv(zc, df, exog_var_names = None, type = 'Univariate', traintest_c
             X_train, X_test = X_trainval.iloc[train_index], X_trainval.iloc[test_index]
         else:
             X_train, X_test = None, None
-            # Update the fit - Update the model fit with additional observed endog/exog values. Updating an ARIMA adds new observations to the model, updating the MLE of the parameters accordingly by performing several new iterations
-        [res_sari, fit] = refit_sarimax(fitfull, zc, endog_train = y_train, endog_test = y_test, 
+            # refit model using new training and testing indices and autoarima in refit_sarimax function
+        [res_sari, fit] = refit_sarimax(zc, endog_train = y_train, endog_test = y_test, 
                                   exog_train = X_train, exog_test = X_test)
         res_sari['crossfold'] = i
         res_sari['type'] = type
@@ -160,7 +164,7 @@ univar_df.to_pickle('../data/sarimax_univariate_cv_results.pkl')
 
 sns.displot(plot_df, x="mmape", hue="type", kind="kde")
 
-####################################### MULTIVARIATE  ###################################################
+####################################### CROSS VALIDATION / FIT MODEL MULTIVARIATE  ###################################################
 X_var_names = ['sfr_price_index', 'mfr_mean_rent', 'mfr_occ', 'cos_month', 'sin_month']
 multi_ = []
 for zc in zcs:
@@ -171,14 +175,14 @@ multi_df = pd.concat(multi_)
 multi_df['mmape'] = multi_df.groupby(['zipcode', 'type'])['MAPE'].transform('mean')
 multi_df.to_pickle('../data/sarimax_multivariate_cv_results.pkl')
 
-# Group and summarise
+####################################### Group and summarise #######################################
 final = pd.concat([univar_df, multi_df])
 final[['maic', 'mbic', 'mmape', 'mmae', 'mmse']] = final.groupby(['zipcode', 'type'])[['aic', 'bic', 'MAPE', 'MAE', 'MSE']].transform('mean')
 
 final.drop(columns = ['aic', 'bic', 'MAPE', 'MAE', 'MSE', 'crossfold'], inplace = True)
 final.drop_duplicates(inplace = True)
-final.to_csv('../data/sarimax_3fold_cv_res.csv')
-# PLOT
+final.to_csv('../data/sarimax_3fold_cv_res_V2_refitautoarima.csv')
+######################################## PLOT #######################################
 
 # create a seaborn plot
 sns.set(style="darkgrid")
