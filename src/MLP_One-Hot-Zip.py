@@ -88,6 +88,11 @@ col_transform = ColumnTransformer(
 # Define class
 from sklearn.preprocessing import OneHotEncoder
 encoder = OneHotEncoder(sparse=False)
+# Reshape the zipcode 1D array to a 2D array
+census_zcta5_geoid_2d = df['census_zcta5_geoid'].values.reshape(-1, 1)
+# Fit the encoder with the 2D array
+encoder.fit(census_zcta5_geoid_2d)
+
 class SFR_DATASET(Dataset):
     def __init__(self, df, Ntrain, Npred, encoder):
         self.data = df.to_dict('records') # random access is easier with dictionaries
@@ -191,7 +196,7 @@ class SFR_MODEL(nn.Module):
 # indim matches length of input vector
 # outdim matches length of output vector
 # hdim?
-model = SFR_MODEL(indim = 84, hdim = 49, outdim = 6)
+model = SFR_MODEL(indim = 84, hdim = 45, outdim = 6)
 
 model.train() # This is one place to set model model to "train' to introduce randomness
 print(model)
@@ -202,7 +207,7 @@ print(model)
 
 opt = Adam(model.parameters()) # this is minimum (telling Adam all the numbers it can vary)
 batchsize = 3
-epochs = 50 # go though data 3x
+epochs = 150 # go though data 3x
 loss_fn = nn.MSELoss()
 
 # create dataloader for training set
@@ -273,11 +278,16 @@ print(epoch)
 print(loss)
 
         
-print(len(np.array(losses_train))/50) # 196050 total losses, 3921 batches per epoch (len(dl))
-print(len(np.array(losses_test))/50) # 9150 losses, 61 for each epoch (61 batches)
+#print(len(np.array(losses_train))/50) # 196050 total losses, 3921 batches per epoch (len(dl))
+#print(len(np.array(losses_test))/50) # 9150 losses, 61 for each epoch (61 batches)
 #print(len(np.array(mape_test_zip['30002']))) # 150
 
 # plot training loss
-plt.plot(res_train[res_train['epoch']==2]['loss_mse'])
+plt.plot(res_train[res_train['epoch']==50]['loss_mse'])
 # plot test loss
-plt.plot(res_test[res_test['epoch']==2]['loss_mse'])
+plt.plot(res_test[res_test['epoch']==50]['loss_mse'])
+
+# plot mape
+plt.plot(res_test['mape'])
+
+test = res_test.groupby('epoch')['mape'].agg('mean')
