@@ -265,9 +265,19 @@ for epoch in trange(epochs):
 
 
 res_train, res_test = pd.DataFrame.from_dict(eval_train), pd.DataFrame.from_dict(eval_test)
+res_train['Type'] = 'Train'
+res_test['Type'] = 'Test'
 
-res_train.to_pickle('../onehot_mlp_train_res.pkl')
-res_test.to_pickle('../onehot_mlp_test_res.pkl')
+res = pd.concat([res_train, res_test])
+res['Model'] = 'MLP-ziponehot'
+res['BatchSize'] = '3'
+
+
+
+res.to_pickle('../mlp_onehot_traintest_results.pkl')
+
+#res_train.to_pickle('../onehot_mlp_train_res.pkl')
+#res_test.to_pickle('../onehot_mlp_test_res.pkl')
 
 
 checkpoint = torch.load("./model_info.pt")
@@ -283,11 +293,14 @@ print(loss)
 #print(len(np.array(mape_test_zip['30002']))) # 150
 
 # plot training loss
-plt.plot(res_train[res_train['epoch']==50]['loss_mse'])
+plt.plot(res_train['loss_mse'])
 # plot test loss
-plt.plot(res_test[res_test['epoch']==50]['loss_mse'])
+plt.plot(res_test[res_test['epoch']==1]['loss_mse'])
 
 # plot mape
 plt.plot(res_test['mape'])
 
-test = res_test.groupby('epoch')['mape'].agg('mean')
+mean_mape_train = res_train.groupby('epoch')['mape'].agg('mean')
+mean_mape_test = res_test.groupby('epoch')['mape'].agg('mean')
+plt.plot(mean_mape_train)
+plt.plot(mean_mape_test)
