@@ -7,3 +7,5 @@ dist/
 src/.ipynb_checkpoints/
 *.log
 *.html
+*.jpg
+*.pt
