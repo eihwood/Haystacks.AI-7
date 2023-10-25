@@ -2,22 +2,12 @@
 import pickle
 import pandas as pd
 import numpy as np
-import math
-import datetime
-from scipy import stats
-import itertools
-from pandas.plotting import register_matplotlib_converters
 import warnings
+import json 
 
+# Scaler
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import TimeSeriesSplit
 from sklearn.compose import ColumnTransformer, make_column_selector
-from torchmetrics.regression import MeanAbsolutePercentageError
-
-
-# Plotting
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 # Torch
 import torch.nn as nn
@@ -25,12 +15,19 @@ import torch
 from torch.optim import Adam
 from torch.utils.data import Dataset, DataLoader
 from tqdm import trange
+from torchmetrics.regression import MeanAbsolutePercentageError
+import torch.nn.functional as F
+
+# Plotting
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 # Set options
 pd.set_option("display.max_rows", 500)
 pd.set_option("display.max_columns", 500)
 warnings.filterwarnings('ignore')
 
+############################################# LOAD DATA ###############################################
 # Load data, sort on zip and date and set index to datetime
 with open("../data/sfr_mfr_mig_pre-processed.pkl", "rb") as f: df = pickle.load(f)
 df.sort_values(['census_cbsa_geoid', 'census_zcta5_geoid', 'date'], inplace = True)
@@ -49,29 +46,16 @@ df = df[['date', 'census_zcta5_geoid',
          'mfr_rental_delta', 'mfr_occ_delta',
         'sin_month', 'cos_month']]
 
+# Create zip dict with keys and tensors for one-hot encoding
+keys = df['census_zcta5_geoid'].to_list()
+zip_dict = {k: i for i, k in enumerate(set(keys))}
 
-# We want to know min / max values per offset columns (keep track for scaling -1, 1). When you get prediciton, scale it back
-# Do min/max only on training dataset otherwise leaking info. 
-sfr_delta_min = df['sfr_rental_delta'].min() 
-sfr_delta_max = df['sfr_rental_delta'].max()
-print('sfr delta min: ', sfr_delta_min)
-print('sfr delta max: ', sfr_delta_max)
+# save out as json
+with open('../zipcode_onehot_dict.json', 'w') as fp:
+    json.dump(zip_dict, fp)
 
-sfp_delta_min = df['sfr_price_delta'].min()
-sfp_delta_max = df['sfr_price_delta'].max()
-print('sfp delta min: ', sfp_delta_min)
-print('spf delta max: ', sfp_delta_max)
 
-mfr_delta_min = df['mfr_rental_delta'].min()
-mfr_delta_max = df['mfr_rental_delta'].max()
-print('mfr delta min: ', mfr_delta_min)
-print('mfr delta max: ', mfr_delta_max)
-
-mfo_delta_min = df['mfr_occ_delta'].min()
-mfo_delta_max = df['mfr_occ_delta'].max()
-print('mfo delta min: ', mfo_delta_min)
-print('mfo delta max: ', mfo_delta_max)
-
+########################################## DEFINE SCALER, CLASS ######################################
 
 # Define scaler
 scaler = MinMaxScaler(feature_range=(-1, 1))
@@ -93,7 +77,7 @@ class SFR_DATASET(Dataset):
         self.zip_dict = zip_dict
         self.Ntrain = Ntrain
         self.Npred = Npred
-        self.zipcode = zc
+        self.zc = zc
     def __len__(self): 
         return len(self.data) - self.Ntrain - self.Npred  # subtract length of input + output
     
@@ -104,7 +88,7 @@ class SFR_DATASET(Dataset):
 
         # Get zip dict tensor as tensor
         # each of these are 12x1 tensors (12 months of data)
-        in_zip = zip_dict.get(self.zipcode)
+        in_zip = F.one_hot(torch.tensor(self.zip_dict[self.zc]), len(self.zip_dict.keys()))
         in_sfr = torch.tensor(input['sfr_rental_delta']) 
         in_sfp = torch.tensor(input['sfr_price_delta'])
         in_mfr = torch.tensor(input['mfr_rental_delta'])
@@ -131,6 +115,25 @@ df_train = df.loc[(df.date < train_test_cutoff)]
 df_test = df.loc[(df.date >= train_test_cutoff)]
 train_X = col_transform.fit_transform(df_train)
 train_X = pd.DataFrame(train_X, columns = col_transform.get_feature_names_out())
+
+# Create dict of min and max delta values to be able to back transform model results
+
+# Do min/max only on training dataset otherwise leaking info. 
+scaling_dict = {'sfrMin': df_train['sfr_rental_delta'].min(),
+               'sfrMax': df_train['sfr_rental_delta'].max(),
+               'sfpMin': df_train['sfr_price_delta'].min(),
+               'sfpMax': df_train['sfr_price_delta'].max(),
+               'mfrMin': df_train['mfr_rental_delta'].min(),
+               'mfrMax': df_train['mfr_rental_delta'].max(),
+               'mfoMin': df_train['mfr_occ_delta'].min(),
+               'mfoMax': df_train['mfr_occ_delta'].max()}
+
+
+# save out as json
+with open('../scaling_dict.json', 'w') as fp:
+    json.dump(scaling_dict, fp)
+
+# Transform test data separately
 test_X = col_transform.fit_transform(df_test)
 test_X = pd.DataFrame(test_X, columns = col_transform.get_feature_names_out())
 
@@ -139,11 +142,6 @@ test_X = pd.DataFrame(test_X, columns = col_transform.get_feature_names_out())
 zip_train = []
 zip_test = []
 
-# Create zip dict with keys and tensors
-zip_dict = {zipcode: i for i, zipcode in enumerate(set(df['census_zcta5_geoid']))}
-x = nn.functional.one_hot(torch.arange(0,181))
-for key, value in zip_dict.items():
-    zip_dict[key] = x[value]
 
 for zipcode in df['census_zcta5_geoid'].unique():
     
@@ -205,7 +203,7 @@ print(model)
 
 opt = Adam(model.parameters()) # this is minimum (telling Adam all the numbers it can vary)
 batchsize = 3
-epochs = 3 # go though data 3x
+epochs = 50 #
 loss_fn = nn.MSELoss()
 
 # create dataloader for training set
@@ -254,7 +252,7 @@ for epoch in trange(epochs):
                                 'mape': mape.cpu().detach().numpy(),
                                 'loss_mse': loss.cpu().detach().numpy()})
                 
-            if losses_test[-1] == min(losses_test):
+            if losses_test[-1] <= min(losses_test):
                 torch.save(model, 'mlp_model.pt')
                 torch.save({'epoch': epoch,'model_state_dict': model.state_dict(),
                                 'optimizer_state_dict': opt.state_dict(),
@@ -269,14 +267,13 @@ res_test['Type'] = 'Test'
 
 res = pd.concat([res_train, res_test])
 res['Model'] = 'MLP-ziponehot'
-res['BatchSize'] = '3'
+res['Train Size'] = 12
+res['Test Size'] = 6
+res['hdim'] = 130
+res['BatchSize'] = 3
 
 
-res.to_pickle('../mlp_onehot_traintest_results.pkl')
-
-#res_train.to_pickle('../onehot_mlp_train_res.pkl')
-#res_test.to_pickle('../onehot_mlp_test_res.pkl')
-
+res.to_pickle('../mlp_onehot_traintest_results-Oct25.pkl')
 
 checkpoint = torch.load("./model_info.pt")
 epoch = checkpoint['epoch']
@@ -285,15 +282,11 @@ loss = checkpoint['loss']
 print(epoch)
 print(loss)
 
-        
-#print(len(np.array(losses_train))/50) # 196050 total losses, 3921 batches per epoch (len(dl))
-#print(len(np.array(losses_test))/50) # 9150 losses, 61 for each epoch (61 batches)
-#print(len(np.array(mape_test_zip['30002']))) # 150
-
+    
 # plot training loss
 plt.plot(res_train['loss_mse'])
 # plot test loss
-plt.plot(res_test[res_test['epoch']==1]['loss_mse'])
+plt.plot(res_test['loss_mse'])
 
 # plot mape
 plt.plot(res_test['mape'])
@@ -302,3 +295,9 @@ mean_mape_train = res_train.groupby('epoch')['mape'].agg('mean')
 mean_mape_test = res_test.groupby('epoch')['mape'].agg('mean')
 plt.plot(mean_mape_train)
 plt.plot(mean_mape_test)
+
+
+mean_loss_train = res_train.groupby('epoch')['loss_mse'].agg('mean')
+mean_loss_test = res_test.groupby('epoch')['loss_mse'].agg('mean')
+plt.plot(mean_loss_train)
+plt.plot(mean_loss_test)
