@@ -50,7 +50,7 @@ df.drop(df.loc[df['census_zcta5_geoid'].isin(drops)].index, inplace=True)
 df = df[['date', 'census_zcta5_geoid', 
          'sfr_rental_delta', 'sfr_price_delta', 
          'mfr_rental_delta', 'mfr_occ_delta',
-        'sin_month', 'cos_month']]
+         'sin_month', 'cos_month']]
 
 # Create zip dict with keys and tensors for one-hot encoding
 keys = df['census_zcta5_geoid'].to_list()
@@ -103,14 +103,13 @@ class SFR_DATASET(Dataset):
         in_cosm = torch.tensor(input['cos_month']) 
         x = torch.cat((in_zip, in_sfr, in_sfp, in_mfr, in_mfo, in_sinm, in_cosm),dim = 0) # concat into 72-wide vector
         y = torch.tensor(output['sfr_rental_delta'])
-        return {'X':x.float(), 'Y':y.float()}
+        return {'X':x.float(), 'Y':y.float(), 'zipcode':self.zc}
 
 def get_date_cutoff(dates, Ntrain, Npred):
     date_ = dates.unique()
     cutoffidx = len(date_) - Ntrain - Npred - 10 # if we want 9 extra months in test
     cutoff_date = date_[cutoffidx]
     return cutoff_date
-
 
 train_test_cutoff = get_date_cutoff(df.date, 12, 6)
 
@@ -166,8 +165,9 @@ train_sfr = torch.utils.data.ConcatDataset(zip_train)
 test_sfr = torch.utils.data.ConcatDataset(zip_test)
 
 # check contents 
-print(len(test_sfr.datasets[0]))
-print(len(train_sfr.datasets[0])) # is 181 (one dataset for each of the 181 zipcodes)
+print(len(test_sfr.datasets)) # is 181 (one dataset for each of the 181 zipcodes)
+print(len(train_sfr.datasets[0])) # 56
+print(len(test_sfr.datasets[0]))  # 10
 
 # MAKE CUTOFF DATE EARLIER SO WE HAVE MORE OF A 80/20 train/test split
 
@@ -210,7 +210,7 @@ print(model)
 
 opt = Adam(model.parameters()) # this is minimum (telling Adam all the numbers it can vary)
 batchsize = 3
-epochs = 2 # ideally want to train while test loss is still going down. if after a while, test levels off. 
+epochs = 30 # ideally want to train while test loss is still going down. if after a while, test levels off. 
 loss_fn = nn.MSELoss()
 
 # create dataloader for training set
@@ -224,11 +224,12 @@ eval_test = []
 losses_test = [] # to compare losses to losses
 
 # to store y and y_hat
-#preds_train = []
-preds_test = []
+preds_train = {}
+preds_test = {}
 
 # Loop through training data, train on it. Then loop through test data and then test on it. Do this within a single epoch. 
 for epoch in trange(epochs):
+    
     #TRAIN
     model.train()
     for i, batch in enumerate(train_dl):
@@ -236,7 +237,6 @@ for epoch in trange(epochs):
         # use inputs and outputs to make model prediction
         x = batch['X']
         y = batch['Y']
-
         y_hat = model(x)
         
         mean_abs_percentage_error = MeanAbsolutePercentageError()
@@ -245,29 +245,47 @@ for epoch in trange(epochs):
         loss = loss_fn(y_hat, y) # calculate loss
         loss.backward() # calculate gradient of loss
         opt.step() # runs the optimizer and updates model params based on gradient
+        
+        for j, zcode in enumerate(batch['zipcode']):
+            preds_train[zcode] = {}
+            preds_train[zcode]['month'] = np.arange(1,7) # predict 6 months
+            preds_train[zcode]['y'] = y[j].numpy()
+            preds_train[zcode]['y_hat'] = y_hat[j].detach().numpy()
+            preds_train[zcode]['epoch'] = epoch
+            preds_train[zcode]['batch'] = j
+            
         eval_train.append({'epoch': epoch, 'batch_num': i, 
-                                'mape': mape.cpu().detach().numpy(),
-                                'loss_mse': loss.cpu().detach().numpy()})
+                           'mape': mape.cpu().detach().numpy(),
+                           'loss_mse': loss.cpu().detach().numpy()})
+        
     # TEST    
     model.eval()
     for i, batch in enumerate(test_dl):
         with torch.no_grad():
             x = batch['X']
             y = batch['Y']
+            zipcode = batch['zipcode']
             y_hat = model(x)
-            # store y and y hat
-            y_store = {'epoch': epoch, 'batch': i, 'Y':y, 'Y_hat':y_hat}
-            preds_test.append(y_store)
             
             mean_abs_percentage_error = MeanAbsolutePercentageError()
             mape = mean_abs_percentage_error(y_hat, y)
+            
             loss = loss_fn(y_hat, y)
             losses_test.append(loss.cpu().detach().numpy())
 
+            for j, zcode in enumerate(batch['zipcode']):
+                preds_test[zcode] = {}
+                preds_test[zcode]['month'] = np.arange(1,7) # predict 6 months
+                preds_test[zcode]['y'] = y[j].numpy()
+                preds_test[zcode]['y_hat'] = y_hat[j].detach().numpy()
+                preds_test[zcode]['epoch'] = epoch
+                preds_test[zcode]['batch'] = j
+                
             eval_test.append({'epoch': epoch, 'batch_num': i, 
-                                'mape': mape.cpu().detach().numpy(),
-                                'loss_mse': loss.cpu().detach().numpy()})
-             # could save each one on an epoch basis associated with a loss, partition out later... but this is fine for now   
+                              'mape': mape.cpu().detach().numpy(),
+                              'loss_mse': loss.cpu().detach().numpy()})
+            
+            # could save each one on an epoch basis associated with a loss, partition out later... but this is fine for now   
             if losses_test[-1] <= min(losses_test):
                 torch.save(model, 'mlp_model.pt')
                 torch.save({'epoch': epoch,'model_state_dict': model.state_dict(),
@@ -275,14 +293,10 @@ for epoch in trange(epochs):
                                 'loss': loss.cpu().detach().numpy(),
                            }, 'model_info.pt')
 
-
-
+# create dataframe of training/test loss and error
 res_train, res_test = pd.DataFrame.from_dict(eval_train), pd.DataFrame.from_dict(eval_test)
 res_train['Type'] = 'Train'
 res_test['Type'] = 'Test'
-
-# get dataframe of all ys and yhats for each epoch and batch
-ys = pd.DataFrame.from_dict(preds_test)
 
 res = pd.concat([res_train, res_test])
 res['Model'] = 'MLP-ziponehot'
@@ -292,9 +306,20 @@ res['Test Size'] = 6
 res['hdim'] = 16
 res['BatchSize'] = 3
 
+res.to_pickle('../mlp_onehot_traintest_results-Oct25_1735.pkl')
 
-res.to_pickle('../mlp_onehot_traintest_results-Oct251445.pkl')
+# create dataframe of training/test actual and predicted values
 
+pred_train, pred_test = pd.DataFrame.from_dict(preds_train, orient='index'), pd.DataFrame.from_dict(preds_test, orient='index')
+pred_train['Type'] = 'Train'
+pred_test['Type'] = 'Test'
+pred = pd.concat([pred_train, pred_test])
+pred = pred.reset_index().rename(columns={'index': 'zcode'})
+
+pred.to_pickle('../mlp_onehot_ypred-Oct25_1735.pkl')
+
+
+# check 
 checkpoint = torch.load("./model_info.pt")
 epoch = checkpoint['epoch']
 loss = checkpoint['loss']
