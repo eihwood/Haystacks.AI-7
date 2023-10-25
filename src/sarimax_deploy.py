@@ -32,6 +32,28 @@ from tqdm import tqdm  # Import tqdm for the progress bar
 pd.set_option("display.max_rows", 500)
 pd.set_option("display.max_columns", 500)
 
+### DEFINE CLASS FOR BLOCKING TIME SERIES CROSS VALIDATION ###
+# create blocked time series class 
+class BlockingTimeSeriesSplit():
+    def __init__(self, n_splits, tr_size=24, tt_size=6):
+        self.n_splits = n_splits
+        self.tr_size = tr_size
+        self.tt_size = tt_size
+    
+    def get_n_splits(self, X, y, groups):
+        return self.n_splits
+    
+    def split(self, X, y=None, groups=None):
+        n_samples = len(X)
+        k_fold_size = self.tr_size + self.tt_size
+        indices = np.arange(n_samples)
+
+        margin = 0
+        for i in np.linspace(0,n_samples-k_fold_size,self.n_splits, dtype='int'):
+            start = i
+            stop = start + k_fold_size
+            mid = start + (k_fold_size - self.tt_size) 
+            yield indices[start: mid], indices[mid + margin: stop]
 
 ################################## DEFINE HELPER FUNCTIONS #################################################
 # Model Evaluation Function
@@ -63,7 +85,8 @@ def refit_sarimax(zc, endog_train, endog_test,exog_train = None, exog_test = Non
 
     # autoarima
     d = ndiffs(endog_train, alpha = 0.05)
-    D = nsdiffs(endog_train, m = 12)
+    #D = nsdiffs(endog_train, m = 12)
+    D = 0
     sxmodel = pm.auto_arima(y = endog_train, X = exog_train,
                             start_p=1, d = d, start_q=1, max_p=3, max_q=3, m=12,
                             start_P=0, start_Q=0, max_P=2, max_Q=2, D = D,
@@ -90,7 +113,7 @@ def arima_findpdqs(y, X=None):
                             suppress_warnings=True, stepwise=True, information_criterion='bic')
     return([sxmodel.order, sxmodel.seasonal_order, sxmodel])
 
-def autoarima_cv(zc, df, exog_var_names = None, type = 'Univariate', traintest_cutoff = ['2022-12-01','2023-01-01']):
+def autoarima_cv(zc, df, exog_var_names = None, type = 'Benchmark', traintest_cutoff = ['2022-12-01','2023-01-01'], splits=4, train_size=24, test_size=6):
     # Subset zipcode zc
     data = df[df['census_zcta5_geoid'] == zc].set_index('date')
     data = data.asfreq('MS')
@@ -103,29 +126,29 @@ def autoarima_cv(zc, df, exog_var_names = None, type = 'Univariate', traintest_c
         X_trainval, X_holdout = None, None
     # Get suggested order params from pm auto arima on training data and initial model
     order, seasonal_order, fitfull = arima_findpdqs(y = y_trainval, X=X_trainval)
-    # Train, Test, Split
-    tscv = TimeSeriesSplit(n_splits = 3, max_train_size=None, test_size = 6) # hold out 6 months as test set
-    res_sari_L = [] # instantiate empty list for storing
-    
-    for i, (train_index, test_index) in enumerate(tscv.split(data_trainval)):
-        y_train, y_test = y_trainval.iloc[train_index], y_trainval.iloc[test_index]
 
+    # cross_validate
+    cv = BlockingTimeSeriesSplit(splits, tr_size=train_size, tt_size=test_size)
+
+    res_sari_L = [] # instantiate empty list for storing
+
+    for i , (tr, tt) in enumerate(cv.split(y_trainval)):
+        y_train, y_test = y_trainval.iloc[tr], y_trainval.iloc[tt]
+        
         if exog_var_names:
-            X_train, X_test = X_trainval.iloc[train_index], X_trainval.iloc[test_index]
+            X_train, X_test = X_trainval.iloc[tr], X_trainval.iloc[tt]
         else:
             X_train, X_test = None, None
             # refit model using new training and testing indices and autoarima in refit_sarimax function
         [res_sari, fit] = refit_sarimax(zc, endog_train = y_train, endog_test = y_test, 
                                   exog_train = X_train, exog_test = X_test)
         res_sari['crossfold'] = i
-        res_sari['type'] = type
+        res_sari['model'] = type
         res_sari_L.append(res_sari)
     # Get Final Holdout Test Score
     cols = pd.concat(res_sari_L).columns
     mape, mae, mse = mod_eval(fitfull, y_holdout, X_holdout, n_periods = 6)
-    test_res = pd.DataFrame({cols[0]:zc, cols[1]:[fitfull.order], cols[2]:[fitfull.seasonal_order], 
-                                 cols[3]:fitfull.aic(), cols[4]:fitfull.bic(),cols[5]:mape, cols[6]:mae, 
-                                 cols[7]:mse, cols[8]:'test score', cols[9]: 'Holdout Test ' + type})
+    test_res = pd.DataFrame({cols[0]:zc, cols[1]:[fitfull.order], cols[2]:[fitfull.seasonal_order], cols[3]:fitfull.aic(), cols[4]:fitfull.bic(),cols[5]:mape, cols[6]:mae, cols[7]:mse, cols[8]:'test score', cols[9]: 'Holdout Test ' + type})
     res_sari_L.append(test_res)
     res_cv = pd.concat(res_sari_L)
     return(res_cv)
@@ -150,7 +173,7 @@ zcs_to_rm = missing_data['census_zcta5_geoid'].unique().tolist()
 
 # Filter rows where the 'zipcode' column is NOT in nan_zipcodes
 df = df.loc[~df['census_zcta5_geoid'].isin(zcs_to_rm)]
-zcs = df_filtered.census_zcta5_geoid.unique()
+zcs = df.census_zcta5_geoid.unique()
 
 ################################ CROSS VALIDATION / FIT MODEL Univariate ##############################################
 uni_ = []
@@ -158,36 +181,60 @@ for zc in zcs:
     univar_res = autoarima_cv(zc, df, exog_var_names = None)
     uni_.append(univar_res)
 univar_df = pd.concat(uni_)
-univar_df['mmape'] = univar_df.groupby(['zipcode', 'type'])['MAPE'].transform('mean')
-plot_df = univar_df[['zipcode', 'type', 'mmape']].drop_duplicates()
-univar_df.to_pickle('../data/sarimax_univariate_cv_results.pkl')
+univar_df['mmape'] = univar_df.groupby(['zipcode', 'model'])['MAPE'].transform('mean')
+plot_df = univar_df[['zipcode', 'model', 'mmape']].drop_duplicates()
+univar_df.to_pickle('../data/sarimax_benchmark_cv_results.pkl')
 
-sns.displot(plot_df, x="mmape", hue="type", kind="kde")
+sns.displot(plot_df, x="mmape", hue="model", kind="kde")
 
-####################################### CROSS VALIDATION / FIT MODEL MULTIVARIATE  ###################################################
-X_var_names = ['sfr_price_index', 'mfr_mean_rent', 'mfr_occ', 'cos_month', 'sin_month']
+####################################### CV / FIT MULTIVARIATE + MFR_OCC###################################################
+X_var_names = ['mfr_occ']
 multi_ = []
 for zc in zcs:
-    multi_res = autoarima_cv(zc, df, exog_var_names=X_var_names, type = 'Multivariate')
+    multi_res = autoarima_cv(zc, df, exog_var_names=X_var_names, type = '+ MFR OCC')
     multi_.append(multi_res)
 
 multi_df = pd.concat(multi_)
-multi_df['mmape'] = multi_df.groupby(['zipcode', 'type'])['MAPE'].transform('mean')
-multi_df.to_pickle('../data/sarimax_multivariate_cv_results.pkl')
+multi_df['mmape'] = multi_df.groupby(['zipcode', 'model'])['MAPE'].transform('mean')
+multi_df.to_pickle('../data/sarimax_mfrocc_cv_results.pkl')
+
+
+
+####################################### CV / FIT MULTIVARIATE + MFR_RENT###################################################
+X_var_names = ['mfr_mean_rent']
+multi_mfrrent = []
+for zc in zcs:
+    multi_res = autoarima_cv(zc, df, exog_var_names=X_var_names, type = '+ MFR Rent')
+    multi_mfrrent.append(multi_res)
+
+multi_mfrr_df = pd.concat(multi_mfrrent)
+multi_mfrr_df.to_pickle('../data/sarimax_mfrrent_cv_results.pkl')
+
+####################################### CV / FIT MULTIVARIATE + MFR_RENT###################################################
+X_var_names = ['mfr_occ', 'mfr_mean_rent']
+multi_ = []
+for zc in zcs:
+    multi_res = autoarima_cv(zc, df, exog_var_names=X_var_names, type = '+ MFR OCC & Rent')
+    multi_.append(multi_res)
+
+multi_mfrro_df = pd.concat(multi_)
+
+multi_mfrro_df.to_pickle('../data/sarimax_mfrrentocc_cv_results.pkl')
+
 
 ####################################### Group and summarise #######################################
-final = pd.concat([univar_df, multi_df])
-final[['maic', 'mbic', 'mmape', 'mmae', 'mmse']] = final.groupby(['zipcode', 'type'])[['aic', 'bic', 'MAPE', 'MAE', 'MSE']].transform('mean')
+final = pd.concat([univar_df, multi_df, multi_mfrr_df, multi_mfrro_df])
+final[['maic', 'mbic', 'mmape', 'mmae', 'mmse']] = final.groupby(['zipcode', 'model'])[['aic', 'bic', 'MAPE', 'MAE', 'MSE']].transform('mean')
 
 final.drop(columns = ['aic', 'bic', 'MAPE', 'MAE', 'MSE', 'crossfold'], inplace = True)
 final.drop_duplicates(inplace = True)
-final.to_csv('../data/sarimax_3fold_cv_res_V2_refitautoarima.csv')
+final.to_csv('../data/pmdarima_cv_res_oct24.csv')
 ######################################## PLOT #######################################
 
 # create a seaborn plot
 sns.set(style="darkgrid")
 
-ax = sns.displot(final, x="mmape", hue="type", kind="kde")
+ax = sns.displot(final, x="mmape", hue="model", kind="kde")
 # save the plot as JPG file
 plt.savefig("../sarimax_cv_res.jpg", dpi=300)
 
