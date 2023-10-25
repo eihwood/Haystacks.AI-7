@@ -27,6 +27,12 @@ pd.set_option("display.max_rows", 500)
 pd.set_option("display.max_columns", 500)
 warnings.filterwarnings('ignore')
 
+# THINGS TO TRY
+# Change cutoff date so we have more than one sample in the test dataset (e.g.) walk it back 9 months
+# Try a smaller hdim (2, 16)
+# 3 months predict instead of 6 months prediction
+
+
 ############################################# LOAD DATA ###############################################
 # Load data, sort on zip and date and set index to datetime
 with open("../data/sfr_mfr_mig_pre-processed.pkl", "rb") as f: df = pickle.load(f)
@@ -101,7 +107,7 @@ class SFR_DATASET(Dataset):
 
 def get_date_cutoff(dates, Ntrain, Npred):
     date_ = dates.unique()
-    cutoffidx = len(date_) - Ntrain - Npred - 1
+    cutoffidx = len(date_) - Ntrain - Npred - 10 # if we want 9 extra months in test
     cutoff_date = date_[cutoffidx]
     return cutoff_date
 
@@ -142,7 +148,6 @@ test_X = pd.DataFrame(test_X, columns = col_transform.get_feature_names_out())
 zip_train = []
 zip_test = []
 
-
 for zipcode in df['census_zcta5_geoid'].unique():
     
     # Filter for single zipcode
@@ -161,9 +166,10 @@ train_sfr = torch.utils.data.ConcatDataset(zip_train)
 test_sfr = torch.utils.data.ConcatDataset(zip_test)
 
 # check contents 
-len(test_sfr.datasets)
-len(train_sfr.datasets) # is 181 (one dataset for each of the 181 zipcodes)
+print(len(test_sfr.datasets[0]))
+print(len(train_sfr.datasets[0])) # is 181 (one dataset for each of the 181 zipcodes)
 
+# MAKE CUTOFF DATE EARLIER SO WE HAVE MORE OF A 80/20 train/test split
 
 # Model - simple multilayer perceptron
 # sequential 3 layer model
@@ -192,7 +198,8 @@ class SFR_MODEL(nn.Module):
 # indim matches length of input vector
 # outdim matches length of output vector
 # hdim?
-model = SFR_MODEL(indim = 253, hdim = 130, outdim = 6)
+# Because of overfitting, cut hdim way down (e.g. 16 hdim) h is essentially degrees of freedom. Could even try 2 to see how it works (maybe)
+model = SFR_MODEL(indim = 253, hdim = 16, outdim = 6)
 
 model.train() # This is one place to set model model to "train' to introduce randomness
 print(model)
@@ -203,7 +210,7 @@ print(model)
 
 opt = Adam(model.parameters()) # this is minimum (telling Adam all the numbers it can vary)
 batchsize = 3
-epochs = 50 #
+epochs = 2 # ideally want to train while test loss is still going down. if after a while, test levels off. 
 loss_fn = nn.MSELoss()
 
 # create dataloader for training set
@@ -215,6 +222,11 @@ test_dl = DataLoader(test_sfr, batch_size = batchsize, shuffle = True, drop_last
 eval_train = []
 eval_test = []
 losses_test = [] # to compare losses to losses
+
+# to store y and y_hat
+#preds_train = []
+preds_test = []
+
 # Loop through training data, train on it. Then loop through test data and then test on it. Do this within a single epoch. 
 for epoch in trange(epochs):
     #TRAIN
@@ -226,6 +238,7 @@ for epoch in trange(epochs):
         y = batch['Y']
 
         y_hat = model(x)
+        
         mean_abs_percentage_error = MeanAbsolutePercentageError()
         mape = mean_abs_percentage_error(y_hat, y)
         
@@ -242,7 +255,10 @@ for epoch in trange(epochs):
             x = batch['X']
             y = batch['Y']
             y_hat = model(x)
-
+            # store y and y hat
+            y_store = {'epoch': epoch, 'batch': i, 'Y':y, 'Y_hat':y_hat}
+            preds_test.append(y_store)
+            
             mean_abs_percentage_error = MeanAbsolutePercentageError()
             mape = mean_abs_percentage_error(y_hat, y)
             loss = loss_fn(y_hat, y)
@@ -251,7 +267,7 @@ for epoch in trange(epochs):
             eval_test.append({'epoch': epoch, 'batch_num': i, 
                                 'mape': mape.cpu().detach().numpy(),
                                 'loss_mse': loss.cpu().detach().numpy()})
-                
+             # could save each one on an epoch basis associated with a loss, partition out later... but this is fine for now   
             if losses_test[-1] <= min(losses_test):
                 torch.save(model, 'mlp_model.pt')
                 torch.save({'epoch': epoch,'model_state_dict': model.state_dict(),
@@ -265,15 +281,19 @@ res_train, res_test = pd.DataFrame.from_dict(eval_train), pd.DataFrame.from_dict
 res_train['Type'] = 'Train'
 res_test['Type'] = 'Test'
 
+# get dataframe of all ys and yhats for each epoch and batch
+ys = pd.DataFrame.from_dict(preds_test)
+
 res = pd.concat([res_train, res_test])
 res['Model'] = 'MLP-ziponehot'
+res['TrainTestCutoffDate'] = train_test_cutoff
 res['Train Size'] = 12
 res['Test Size'] = 6
-res['hdim'] = 130
+res['hdim'] = 16
 res['BatchSize'] = 3
 
 
-res.to_pickle('../mlp_onehot_traintest_results-Oct25.pkl')
+res.to_pickle('../mlp_onehot_traintest_results-Oct251445.pkl')
 
 checkpoint = torch.load("./model_info.pt")
 epoch = checkpoint['epoch']
