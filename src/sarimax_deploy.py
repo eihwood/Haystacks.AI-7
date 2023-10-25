@@ -9,7 +9,6 @@ import warnings
 warnings.filterwarnings('ignore')
 import itertools
 from tqdm import tqdm  # Import tqdm for the progress bar
-from sklearn.model_selection import TimeSeriesSplit
 
 # Plotting
 import matplotlib.pyplot as plt
@@ -228,7 +227,7 @@ final[['maic', 'mbic', 'mmape', 'mmae', 'mmse']] = final.groupby(['zipcode', 'mo
 
 final.drop(columns = ['aic', 'bic', 'MAPE', 'MAE', 'MSE', 'crossfold'], inplace = True)
 final.drop_duplicates(inplace = True)
-final.to_csv('../data/pmdarima_cv_res_oct24.csv')
+final.to_pickle('../data/pmdarima_cv_res_oct24.pkl')
 ######################################## PLOT #######################################
 
 # create a seaborn plot
