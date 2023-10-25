@@ -86,33 +86,25 @@ col_transform = ColumnTransformer(
 
 ###################### DEFINE CLASS ###################
 # Define class
-from sklearn.preprocessing import OneHotEncoder
-encoder = OneHotEncoder(sparse=False)
-# Reshape the zipcode 1D array to a 2D array
-census_zcta5_geoid_2d = df['census_zcta5_geoid'].values.reshape(-1, 1)
-# Fit the encoder with the 2D array
-encoder.fit(census_zcta5_geoid_2d)
 
 class SFR_DATASET(Dataset):
-    def __init__(self, df, Ntrain, Npred, encoder):
+    def __init__(self, df, Ntrain, Npred, zip_dict, zc):
         self.data = df.to_dict('records') # random access is easier with dictionaries
-        self.encoder = encoder
+        self.zip_dict = zip_dict
         self.Ntrain = Ntrain
         self.Npred = Npred
+        self.zipcode = zc
     def __len__(self): 
         return len(self.data) - self.Ntrain - self.Npred  # subtract length of input + output
     
     def __getitem__(self, idx): 
-        
+
         input = pd.DataFrame(self.data[idx:idx + self.Ntrain])
         output = pd.DataFrame(self.data[idx + self.Ntrain : idx + self.Ntrain + self.Npred])
-        
+
+        # Get zip dict tensor as tensor
         # each of these are 12x1 tensors (12 months of data)
-        #in_zip = self.encoder.fit_transform([[zipcode] for zipcode in input['census_zcta5_geoid'].values])
-        #in_zip = torch.tensor(in_zip, dtype=torch.float32)  #
-        #in_zip = in_zip.view(-1) # This makes it so they can concatenate below
-        in_zip = self.encoder.fit_transform([input['census_zcta5_geoid'].values])
-        in_zip = torch.tensor(in_zip.flatten(), dtype=torch.float32)  # Flatten the 2D array
+        in_zip = zip_dict.get(self.zipcode)
         in_sfr = torch.tensor(input['sfr_rental_delta']) 
         in_sfp = torch.tensor(input['sfr_price_delta'])
         in_mfr = torch.tensor(input['mfr_rental_delta'])
@@ -146,6 +138,13 @@ test_X = pd.DataFrame(test_X, columns = col_transform.get_feature_names_out())
 # Create zip list to store class for each zip
 zip_train = []
 zip_test = []
+
+# Create zip dict with keys and tensors
+zip_dict = {zipcode: i for i, zipcode in enumerate(set(df['census_zcta5_geoid']))}
+x = nn.functional.one_hot(torch.arange(0,181))
+for key, value in zip_dict.items():
+    zip_dict[key] = x[value]
+
 for zipcode in df['census_zcta5_geoid'].unique():
     
     # Filter for single zipcode
@@ -153,19 +152,18 @@ for zipcode in df['census_zcta5_geoid'].unique():
     test_zip_df = test_X[test_X['census_zcta5_geoid'] == zipcode]
     
     # Transform training data, cast class and store
-    train_sfr = SFR_DATASET(train_zip_df, 12, 6, encoder)
+    train_sfr = SFR_DATASET(train_zip_df, 12, 6, zip_dict, zipcode)
     zip_train.append(train_sfr)
     
     # Transform testing data, cast class and store
-    test_sfr = SFR_DATASET(test_zip_df, 12, 6, encoder)
+    test_sfr = SFR_DATASET(test_zip_df, 12, 6, zip_dict, zipcode)
     zip_test.append(test_sfr)
 
 train_sfr = torch.utils.data.ConcatDataset(zip_train)
 test_sfr = torch.utils.data.ConcatDataset(zip_test)
 
 # check contents 
-lens = [len(dataset) for dataset in train_sfr.datasets]
-pd.Series(lens).unique() # 65 ... what does this 65 signify?
+len(test_sfr.datasets)
 len(train_sfr.datasets) # is 181 (one dataset for each of the 181 zipcodes)
 
 
@@ -196,7 +194,7 @@ class SFR_MODEL(nn.Module):
 # indim matches length of input vector
 # outdim matches length of output vector
 # hdim?
-model = SFR_MODEL(indim = 84, hdim = 45, outdim = 6)
+model = SFR_MODEL(indim = 253, hdim = 130, outdim = 6)
 
 model.train() # This is one place to set model model to "train' to introduce randomness
 print(model)
@@ -207,7 +205,7 @@ print(model)
 
 opt = Adam(model.parameters()) # this is minimum (telling Adam all the numbers it can vary)
 batchsize = 3
-epochs = 150 # go though data 3x
+epochs = 3 # go though data 3x
 loss_fn = nn.MSELoss()
 
 # create dataloader for training set
@@ -228,6 +226,7 @@ for epoch in trange(epochs):
         # use inputs and outputs to make model prediction
         x = batch['X']
         y = batch['Y']
+
         y_hat = model(x)
         mean_abs_percentage_error = MeanAbsolutePercentageError()
         mape = mean_abs_percentage_error(y_hat, y)
@@ -271,7 +270,6 @@ res_test['Type'] = 'Test'
 res = pd.concat([res_train, res_test])
 res['Model'] = 'MLP-ziponehot'
 res['BatchSize'] = '3'
-
 
 
 res.to_pickle('../mlp_onehot_traintest_results.pkl')
