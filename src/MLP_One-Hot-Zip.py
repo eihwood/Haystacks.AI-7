@@ -28,8 +28,8 @@ pd.set_option("display.max_columns", 500)
 warnings.filterwarnings('ignore')
 
 # THINGS TO TRY
-# Change cutoff date so we have more than one sample in the test dataset (e.g.) walk it back 9 months
-# Try a smaller hdim (2, 16)
+# Change cutoff date so we have more than one sample in the test dataset (e.g.) walk it back 9 months (X)
+# Try a smaller hdim (2, 16) (X)
 # 3 months predict instead of 6 months prediction
 
 
@@ -75,7 +75,6 @@ col_transform = ColumnTransformer(
 
 
 ###################### DEFINE CLASS ###################
-# Define class
 
 class SFR_DATASET(Dataset):
     def __init__(self, df, Ntrain, Npred, zip_dict, zc):
@@ -111,7 +110,7 @@ def get_date_cutoff(dates, Ntrain, Npred):
     cutoff_date = date_[cutoffidx]
     return cutoff_date
 
-train_test_cutoff = get_date_cutoff(df.date, 12, 6)
+train_test_cutoff = get_date_cutoff(df.date, 12, 3)
 
 # Cast the class, separating out by zipcdoe
 # Transform data
@@ -122,7 +121,6 @@ train_X = col_transform.fit_transform(df_train)
 train_X = pd.DataFrame(train_X, columns = col_transform.get_feature_names_out())
 
 # Create dict of min and max delta values to be able to back transform model results
-
 # Do min/max only on training dataset otherwise leaking info. 
 scaling_dict = {'sfrMin': df_train['sfr_rental_delta'].min(),
                'sfrMax': df_train['sfr_rental_delta'].max(),
@@ -154,11 +152,11 @@ for zipcode in df['census_zcta5_geoid'].unique():
     test_zip_df = test_X[test_X['census_zcta5_geoid'] == zipcode]
     
     # Transform training data, cast class and store
-    train_sfr = SFR_DATASET(train_zip_df, 12, 6, zip_dict, zipcode)
+    train_sfr = SFR_DATASET(train_zip_df, 12, 3, zip_dict, zipcode)
     zip_train.append(train_sfr)
     
     # Transform testing data, cast class and store
-    test_sfr = SFR_DATASET(test_zip_df, 12, 6, zip_dict, zipcode)
+    test_sfr = SFR_DATASET(test_zip_df, 12, 3, zip_dict, zipcode)
     zip_test.append(test_sfr)
 
 train_sfr = torch.utils.data.ConcatDataset(zip_train)
@@ -169,7 +167,6 @@ print(len(test_sfr.datasets)) # is 181 (one dataset for each of the 181 zipcodes
 print(len(train_sfr.datasets[0])) # 56
 print(len(test_sfr.datasets[0]))  # 10
 
-# MAKE CUTOFF DATE EARLIER SO WE HAVE MORE OF A 80/20 train/test split
 
 # Model - simple multilayer perceptron
 # sequential 3 layer model
@@ -188,8 +185,7 @@ class SFR_MODEL(nn.Module):
             nn.Linear(indim, hdim),
             nn.Dropout(p=0.5),
             nn.LeakyReLU(),
-            nn.Linear(hdim, outdim)#,
-            #nn.Tanh()
+            nn.Linear(hdim, outdim)
         )
     def forward(self, x):
         return self.layers(x)
@@ -199,7 +195,9 @@ class SFR_MODEL(nn.Module):
 # outdim matches length of output vector
 # hdim?
 # Because of overfitting, cut hdim way down (e.g. 16 hdim) h is essentially degrees of freedom. Could even try 2 to see how it works (maybe)
-model = SFR_MODEL(indim = 253, hdim = 16, outdim = 6)
+hdim = 16
+
+model = SFR_MODEL(indim = 253, hdim = hdim, outdim = 3)
 
 model.train() # This is one place to set model model to "train' to introduce randomness
 print(model)
@@ -210,10 +208,10 @@ print(model)
 
 opt = Adam(model.parameters()) # this is minimum (telling Adam all the numbers it can vary)
 batchsize = 3
-epochs = 30 # ideally want to train while test loss is still going down. if after a while, test levels off. 
+epochs = 50 # ideally want to train while test loss is still going down. if after a while, test levels off. 
 loss_fn = nn.MSELoss()
 
-months_output = np.arange(1,7) # set based on prediction window (currently 6 mos)
+months_output = np.arange(1,4) # set based on prediction window (currently 6 mos)
 
 # create dataloader for training set
 train_dl = DataLoader(train_sfr, batch_size = batchsize, shuffle = True, drop_last = True)
@@ -304,11 +302,11 @@ res = pd.concat([res_train, res_test])
 res['Model'] = 'MLP-ziponehot'
 res['TrainTestCutoffDate'] = train_test_cutoff
 res['Train Size'] = 12
-res['Test Size'] = 6
-res['hdim'] = 16
+res['Test Size'] = 3
+res['hdim'] = hdim
 res['BatchSize'] = 3
 
-res.to_pickle('../mlp_onehot_traintest_results-Oct25_2015.pkl')
+res.to_pickle('../mlp_onehot_traintest_results-TS3-hdim16.pkl')
 
 # create dataframe of training/test actual and predicted values
 
@@ -317,7 +315,7 @@ pred_train['Type'] = 'Train'
 pred_test['Type'] = 'Test'
 pred = pd.concat([pred_train, pred_test])
 
-pred.to_pickle('../mlp_onehot_ypred-Oct25_2015.pkl')
+pred.to_pickle('../mlp_onehot_ypred-TS3-hdim16.pkl')
 
 
 # check 
@@ -335,7 +333,7 @@ plt.plot(res_train['loss_mse'])
 plt.plot(res_test['loss_mse'])
 
 # plot mape
-plt.plot(res_test['mape'])
+plt.plot(res_train['mape'])
 
 mean_mape_train = res_train.groupby('epoch')['mape'].agg('mean')
 mean_mape_test = res_test.groupby('epoch')['mape'].agg('mean')
