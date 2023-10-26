@@ -213,6 +213,8 @@ batchsize = 3
 epochs = 30 # ideally want to train while test loss is still going down. if after a while, test levels off. 
 loss_fn = nn.MSELoss()
 
+months_output = np.arange(1,7) # set based on prediction window (currently 6 mos)
+
 # create dataloader for training set
 train_dl = DataLoader(train_sfr, batch_size = batchsize, shuffle = True, drop_last = True)
 # Apply dataloader to test set
@@ -224,8 +226,8 @@ eval_test = []
 losses_test = [] # to compare losses to losses
 
 # to store y and y_hat
-preds_train = {}
-preds_test = {}
+preds_train = []
+preds_test = []
 
 # Loop through training data, train on it. Then loop through test data and then test on it. Do this within a single epoch. 
 for epoch in trange(epochs):
@@ -247,13 +249,13 @@ for epoch in trange(epochs):
         opt.step() # runs the optimizer and updates model params based on gradient
         
         for j, zcode in enumerate(batch['zipcode']):
-            preds_train[zcode] = {}
-            preds_train[zcode]['month'] = np.arange(1,7) # predict 6 months
-            preds_train[zcode]['y'] = y[j].numpy()
-            preds_train[zcode]['y_hat'] = y_hat[j].detach().numpy()
-            preds_train[zcode]['epoch'] = epoch
-            preds_train[zcode]['batch'] = j
-            
+            preds_train.append({'zcode': zcode,
+                                'month': months_output,
+                                'y': y[j].numpy(),
+                                'y_hat': y_hat[j].detach().numpy(),
+                                'epoch': epoch, 
+                                'batch': j})
+
         eval_train.append({'epoch': epoch, 'batch_num': i, 
                            'mape': mape.cpu().detach().numpy(),
                            'loss_mse': loss.cpu().detach().numpy()})
@@ -274,12 +276,12 @@ for epoch in trange(epochs):
             losses_test.append(loss.cpu().detach().numpy())
 
             for j, zcode in enumerate(batch['zipcode']):
-                preds_test[zcode] = {}
-                preds_test[zcode]['month'] = np.arange(1,7) # predict 6 months
-                preds_test[zcode]['y'] = y[j].numpy()
-                preds_test[zcode]['y_hat'] = y_hat[j].detach().numpy()
-                preds_test[zcode]['epoch'] = epoch
-                preds_test[zcode]['batch'] = j
+                preds_test.append({'zcode': zcode,
+                                   'month': months_output,
+                                   'y': y[j].numpy(),
+                                   'y_hat': y_hat[j].detach().numpy(),
+                                   'epoch': epoch, 
+                                   'batch': j})
                 
             eval_test.append({'epoch': epoch, 'batch_num': i, 
                               'mape': mape.cpu().detach().numpy(),
@@ -306,17 +308,16 @@ res['Test Size'] = 6
 res['hdim'] = 16
 res['BatchSize'] = 3
 
-res.to_pickle('../mlp_onehot_traintest_results-Oct25_1735.pkl')
+res.to_pickle('../mlp_onehot_traintest_results-Oct25_2015.pkl')
 
 # create dataframe of training/test actual and predicted values
 
-pred_train, pred_test = pd.DataFrame.from_dict(preds_train, orient='index'), pd.DataFrame.from_dict(preds_test, orient='index')
+pred_train, pred_test = pd.DataFrame.from_dict(preds_train), pd.DataFrame.from_dict(preds_test)
 pred_train['Type'] = 'Train'
 pred_test['Type'] = 'Test'
 pred = pd.concat([pred_train, pred_test])
-pred = pred.reset_index().rename(columns={'index': 'zcode'})
 
-pred.to_pickle('../mlp_onehot_ypred-Oct25_1735.pkl')
+pred.to_pickle('../mlp_onehot_ypred-Oct25_2015.pkl')
 
 
 # check 
